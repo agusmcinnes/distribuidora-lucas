@@ -20,7 +20,7 @@ class Command(BaseCommand):
         parser.add_argument(
             "--interval",
             type=int,
-            default=300,  # 5 minutos
+            default=40,  # 40 segundos
             help="Intervalo en segundos entre procesamientos",
         )
         parser.add_argument(
