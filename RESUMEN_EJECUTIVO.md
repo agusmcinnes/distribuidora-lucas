@@ -1,4 +1,4 @@
-# 📋 RESUMEN EJECUTIVO PARA JEFE
+# 📋 RESUMEN EJECUTIVO
 
 **Sistema de Alertas - Distribuidora Lucas**
 
