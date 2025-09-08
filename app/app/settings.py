@@ -46,6 +46,7 @@ INSTALLED_APPS = [
     "company",
     "emails",
     "imap_handler",
+    "telegram_bot",  # Nueva aplicación para Telegram
 ]
 
 MIDDLEWARE = [
@@ -182,6 +183,16 @@ LOW_PRIORITY_KEYWORDS = [
         "LOW_PRIORITY_KEYWORDS", "newsletter,promoción,marketing,notificación"
     ).split(",")
 ]
+
+# ==================================
+# CONFIGURACIÓN TELEGRAM
+# ==================================
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_WEBHOOK_URL = os.getenv("TELEGRAM_WEBHOOK_URL", "")
+TELEGRAM_WEBHOOK_SECRET = os.getenv("TELEGRAM_WEBHOOK_SECRET", "")
+
+# Chat ID por defecto para alertas (se puede configurar desde el admin)
+TELEGRAM_DEFAULT_CHAT_ID = os.getenv("TELEGRAM_DEFAULT_CHAT_ID", "")
 
 # Logging configuration
 LOGGING = {
