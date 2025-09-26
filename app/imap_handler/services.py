@@ -360,7 +360,6 @@ class IMAPEmailHandler:
                 sender=email_data["sender"],
                 subject=email_data["subject"],
                 received_date=email_data["received_date"],
-                company=self.config.company,
             ).first()
 
             if existing_email:
@@ -377,7 +376,6 @@ class IMAPEmailHandler:
                 subject=email_data["subject"],
                 body=email_data["body"],
                 received_date=email_data["received_date"],
-                company=self.config.company,
                 priority=priority,
                 status="pending",
                 assigned_to=assigned_user,
@@ -392,6 +390,9 @@ class IMAPEmailHandler:
             logger.info(
                 f"Email creado: {received_email.id} - {email_data['subject'][:50]}"
             )
+
+            # Enviar notificación por Telegram
+            self._send_telegram_notification(received_email)
 
             # Marcar email como leído en el servidor
             self._mark_email_as_read(email_uid)
@@ -750,3 +751,35 @@ class IMAPService:
 
         # Por defecto, prioridad media
         return "medium"
+
+    def _send_telegram_notification(self, received_email):
+        """
+        Enviar notificación por Telegram para el email recibido
+        """
+        try:
+            from telegram_bot.services import TelegramService
+            
+            logger.info(f"📱 Enviando notificación Telegram para email {received_email.id}")
+            
+            # Crear el servicio de Telegram
+            telegram_service = TelegramService()
+            
+            # Enviar alerta usando el método existente
+            success = telegram_service.send_email_alert(received_email)
+            
+            if success:
+                logger.info(f"✅ Notificación Telegram enviada para email {received_email.id}")
+                # Marcar como enviado
+                received_email.sent_at = timezone.now()
+                received_email.save(update_fields=['sent_at'])
+            else:
+                logger.warning(f"⚠️ No se pudo enviar notificación Telegram para email {received_email.id}")
+                
+        except Exception as e:
+            logger.error(f"❌ Error enviando notificación Telegram para email {received_email.id}: {str(e)}")
+            # Guardar el error en el email si es posible
+            try:
+                received_email.error_message = f"Error Telegram: {str(e)}"
+                received_email.save(update_fields=['error_message'])
+            except:
+                pass

@@ -67,13 +67,6 @@ class IMAPConfiguration(models.Model):
         verbose_name="Máx. emails por verificación",
         help_text="Número máximo de emails a procesar por verificación",
     )
-    company = models.ForeignKey(
-        "company.Company",
-        on_delete=models.CASCADE,
-        related_name="imap_configs",
-        verbose_name="Empresa",
-        help_text="Empresa asociada a esta configuración",
-    )
     created_at = models.DateTimeField(
         auto_now_add=True, verbose_name="Fecha de creación"
     )
@@ -93,7 +86,7 @@ class IMAPConfiguration(models.Model):
         ordering = ["name"]
 
     def __str__(self):
-        return f"{self.name} ({self.company.name})"
+        return f"{self.name}"
 
     def is_due_for_check(self):
         """Verifica si es hora de revisar emails"""

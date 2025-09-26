@@ -1,0 +1,189 @@
+{% extends "admin/change_form.html" %}
+{% load i18n admin_urls static admin_modify %}
+
+{% block extrahead %}
+{{ block.super }}
+<style>
+.company-creation-help {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white;
+    padding: 20px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+    box-shadow: 0 4px 15px rgba(0,0,0,0.1);
+}
+
+.company-creation-help h3 {
+    margin-top: 0;
+    font-size: 1.4em;
+}
+
+.fieldset {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 15px;
+    margin-bottom: 20px;
+}
+
+.fieldset h2 {
+    background: #495057;
+    color: white;
+    margin: -15px -15px 15px -15px;
+    padding: 10px 15px;
+    border-radius: 7px 7px 0 0;
+    font-size: 1.1em;
+}
+
+.field-box {
+    margin-bottom: 15px;
+}
+
+.form-row {
+    display: flex;
+    align-items: center;
+    margin-bottom: 10px;
+}
+
+.form-row label {
+    font-weight: bold;
+    min-width: 150px;
+    margin-right: 10px;
+}
+
+.helptext {
+    font-size: 0.9em;
+    color: #6c757d;
+    margin-top: 5px;
+    font-style: italic;
+}
+
+.required label:after {
+    content: " *";
+    color: #dc3545;
+}
+
+.success-info {
+    background: #d4edda;
+    border: 1px solid #c3e6cb;
+    color: #155724;
+    padding: 15px;
+    border-radius: 8px;
+    margin-top: 20px;
+}
+
+.warning-info {
+    background: #fff3cd;
+    border: 1px solid #ffeaa7;
+    color: #856404;
+    padding: 15px;
+    border-radius: 8px;
+    margin-bottom: 20px;
+}
+</style>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    // Validación en tiempo real del schema name
+    const schemaField = document.getElementById('id_schema_name');
+    if (schemaField) {
+        schemaField.addEventListener('input', function() {
+            const value = this.value;
+            const validPattern = /^[a-zA-Z0-9_-]+$/;
+            
+            if (value && !validPattern.test(value)) {
+                this.style.borderColor = '#dc3545';
+                this.style.backgroundColor = '#f8d7da';
+            } else {
+                this.style.borderColor = '#ced4da';
+                this.style.backgroundColor = 'white';
+            }
+        });
+    }
+    
+    // Validación de contraseñas
+    const passwordField = document.getElementById('id_admin_password');
+    const confirmField = document.getElementById('id_admin_password_confirm');
+    
+    function validatePasswords() {
+        if (passwordField && confirmField) {
+            if (passwordField.value && confirmField.value) {
+                if (passwordField.value !== confirmField.value) {
+                    confirmField.style.borderColor = '#dc3545';
+                    confirmField.style.backgroundColor = '#f8d7da';
+                } else {
+                    confirmField.style.borderColor = '#28a745';
+                    confirmField.style.backgroundColor = '#d4edda';
+                }
+            }
+        }
+    }
+    
+    if (passwordField) passwordField.addEventListener('input', validatePasswords);
+    if (confirmField) confirmField.addEventListener('input', validatePasswords);
+    
+    // Auto-generar schema name basado en el nombre de la empresa
+    const nameField = document.getElementById('id_name');
+    if (nameField && schemaField) {
+        nameField.addEventListener('input', function() {
+            if (!schemaField.value) {
+                let suggestion = this.value
+                    .toLowerCase()
+                    .replace(/[^a-zA-Z0-9]/g, '_')
+                    .replace(/_+/g, '_')
+                    .replace(/^_|_$/g, '');
+                
+                if (suggestion.length > 30) {
+                    suggestion = suggestion.substring(0, 30);
+                }
+                
+                schemaField.value = suggestion;
+            }
+        });
+    }
+});
+</script>
+{% endblock %}
+
+{% block content %}
+<div class="company-creation-help">
+    <h3>🏢 Crear Nueva Empresa Distribuidora</h3>
+    <p>Este formulario creará una empresa completa con:</p>
+    <ul>
+        <li>✅ Esquema de base de datos independiente</li>
+        <li>✅ Dominio de acceso personalizado</li>
+        <li>✅ Usuario administrador con acceso completo</li>
+        <li>✅ Roles básicos configurados</li>
+        <li>✅ Sistema de alertas listo para usar</li>
+    </ul>
+</div>
+
+<div class="warning-info">
+    <strong>⚠️ Importante:</strong> Una vez creada la empresa, no podrás cambiar el schema name ni el dominio principal. 
+    Asegúrate de que toda la información sea correcta antes de guardar.
+</div>
+
+{{ block.super }}
+
+{% if messages %}
+<div class="success-info">
+    {% for message in messages %}
+        <div class="alert alert-{{ message.tags }}">
+            {{ message|safe }}
+        </div>
+    {% endfor %}
+</div>
+{% endif %}
+
+{% endblock %}
+
+{% block submit_buttons_bottom %}
+<div class="submit-row">
+    <input type="submit" value="🚀 Crear Empresa Completa" class="default" name="_save" style="background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); border: none; padding: 12px 25px; font-size: 16px; border-radius: 6px;">
+    <p class="deletelink-box">
+        <a href="{% url 'admin:company_company_changelist' %}" class="deletelink">
+            Cancelar
+        </a>
+    </p>
+</div>
+{% endblock %}

@@ -1,0 +1,297 @@
+{% extends "admin/index.html" %} {% load i18n %} {% block extrahead %}{{
+block.super }}
+<style>
+  .cross-tenant-dashboard-link {
+    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+    color: white !important;
+    padding: 15px 25px;
+    border-radius: 8px;
+    text-decoration: none !important;
+    display: inline-block;
+    margin: 20px 0;
+    font-weight: bold;
+    font-size: 16px;
+    box-shadow: 0 4px 15px rgba(0, 0, 0, 0.2);
+    transition: transform 0.2s ease, box-shadow 0.2s ease;
+  }
+
+  .cross-tenant-dashboard-link:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 6px 20px rgba(0, 0, 0, 0.3);
+  }
+
+  .dashboard-info {
+    background: #000000ff;
+    border-left: 4px solid #007bff;
+    padding: 15px;
+    margin: 20px 0;
+    border-radius: 4px;
+    color: white;
+  }
+
+  .quick-actions {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px 0;
+  }
+
+  .quick-actions h3 {
+    color: #495057;
+    margin-top: 0;
+  }
+
+  .action-button {
+    background: #28a745;
+    color: white !important;
+    padding: 10px 20px;
+    border-radius: 6px;
+    text-decoration: none !important;
+    display: inline-block;
+    margin: 5px 10px 5px 0;
+    font-weight: bold;
+    transition: background 0.2s ease;
+  }
+
+  .action-button:hover {
+    background: #218838;
+  }
+
+  .action-button.secondary {
+    background: #6c757d;
+  }
+
+  .action-button.secondary:hover {
+    background: #545b62;
+  }
+
+  .tenant-summary {
+    background: #e9ecef;
+    border-radius: 8px;
+    padding: 15px;
+    margin: 20px 0;
+  }
+
+  .tenant-summary h4 {
+    color: #495057;
+    margin-top: 0;
+  }
+
+  .stats-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 15px;
+    margin: 15px 0;
+  }
+
+  .stat-card {
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 15px;
+    text-align: center;
+  }
+
+  .stat-number {
+    font-size: 2em;
+    font-weight: bold;
+    color: #007bff;
+  }
+
+  .stat-label {
+    color: #6c757d;
+    font-size: 0.9em;
+  }
+
+  .company-welcome {
+    background: linear-gradient(135deg, #28a745 0%, #20c997 100%);
+    color: white;
+    padding: 20px;
+    border-radius: 8px;
+    margin: 20px 0;
+    text-align: center;
+  }
+
+  .company-welcome h2 {
+    margin: 0 0 10px 0;
+    font-size: 1.8em;
+  }
+
+  .company-info {
+    background: #f8f9fa;
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+    margin: 20px 0;
+  }
+
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 15px;
+    margin: 15px 0;
+  }
+
+  .info-card {
+    background: white;
+    border: 1px solid #dee2e6;
+    border-radius: 6px;
+    padding: 15px;
+    text-align: center;
+  }
+
+  .info-title {
+    font-weight: bold;
+    color: #495057;
+    margin-bottom: 10px;
+  }
+
+  .info-description {
+    color: #6c757d;
+    font-size: 0.9em;
+  }
+
+  .quick-links {
+    background: #e3f2fd;
+    border-left: 4px solid #2196f3;
+    padding: 15px;
+    margin: 20px 0;
+    border-radius: 4px;
+  }
+
+  .quick-links h3 {
+    color: #1976d2;
+    margin-top: 0;
+  }
+
+  .link-button {
+    background: #2196f3;
+    color: white !important;
+    padding: 8px 16px;
+    border-radius: 4px;
+    text-decoration: none !important;
+    display: inline-block;
+    margin: 5px 10px 5px 0;
+    font-size: 0.9em;
+    transition: background 0.2s ease;
+  }
+
+  .link-button:hover {
+    background: #1976d2;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+
+{% if is_public_schema %}
+<div class="quick-actions">
+  <h3>🚀 Acciones Rápidas</h3>
+  <p>Gestiona las empresas distribuidoras desde aquí:</p>
+  <a href="{% url 'admin:company_company_add' %}" class="action-button">
+    🏢 Crear Nueva Empresa
+  </a>
+  <a
+    href="{% url 'admin:company_company_changelist' %}"
+    class="action-button secondary"
+  >
+    📋 Ver Todas las Empresas
+  </a>
+  <a href="/cross-tenant-dashboard/" class="action-button secondary">
+    📊 Dashboard Multi-Tenant
+  </a>
+</div>
+{% endif %}
+
+{% if is_public_schema and companies_count is not None %}
+<div class="tenant-summary">
+  <h4>📈 Resumen del Sistema</h4>
+  <div class="stats-grid">
+    <div class="stat-card">
+      <div class="stat-number">{{ companies_count }}</div>
+      <div class="stat-label">Empresas Activas</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-number">{{ total_users }}</div>
+      <div class="stat-label">Usuarios Totales</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-number">{{ total_emails }}</div>
+      <div class="stat-label">Emails Procesados</div>
+    </div>
+    <div class="stat-card">
+      <div class="stat-number">{{ total_bots }}</div>
+      <div class="stat-label">Bots de Telegram</div>
+    </div>
+  </div>
+</div>
+{% endif %}
+
+{% if is_public_schema %}
+<div class="dashboard-info">
+  <h3>📊 Dashboard Cross-Tenant</h3>
+  <p>
+    Como super administrador, puedes acceder al dashboard integrado para ver
+    datos de todas las empresas en tiempo real:
+  </p>
+  <a href="/cross-tenant-dashboard/" class="cross-tenant-dashboard-link">
+    🚀 Ver Dashboard Multi-Tenant
+  </a>
+</div>
+{% endif %}
+
+{% if is_tenant_schema %}
+<div class="company-welcome">
+  <h2>🏢 Panel de Administración de Empresa</h2>
+  <p>Gestiona los recursos y configuración específicos de tu empresa</p>
+</div>
+
+<div class="company-info">
+  <h3>📋 Funcionalidades Disponibles</h3>
+  <div class="info-grid">
+    <div class="info-card">
+      <div class="info-title">👥 Gestión de Usuarios</div>
+      <div class="info-description">
+        Administra los usuarios de tu empresa, roles y permisos de acceso
+      </div>
+    </div>
+    <div class="info-card">
+      <div class="info-title">📧 Sistema de Emails</div>
+      <div class="info-description">
+        Monitorea y gestiona los emails recibidos y las alertas generadas
+      </div>
+    </div>
+    <div class="info-card">
+      <div class="info-title">⚙️ Configuración IMAP</div>
+      <div class="info-description">
+        Configura la conexión con tu servidor de email para recibir mensajes
+      </div>
+    </div>
+    <div class="info-card">
+      <div class="info-title">🤖 Bot de Telegram</div>
+      <div class="info-description">
+        Configura las alertas automáticas por Telegram para tu equipo
+      </div>
+    </div>
+  </div>
+</div>
+
+<div class="quick-links">
+  <h3>🚀 Acceso Rápido</h3>
+  <p>Enlaces directos a las secciones más utilizadas:</p>
+
+  {% for app in available_apps %}
+    {% for model in app.models %}
+      {% if model.perms.change or model.perms.add %}
+        <a href="{{ model.admin_url }}" class="link-button">
+          {{ model.name }}
+        </a>
+      {% endif %}
+    {% endfor %}
+  {% endfor %}
+</div>
+{% endif %}
+
+{{ block.super }}
+{% endblock %}

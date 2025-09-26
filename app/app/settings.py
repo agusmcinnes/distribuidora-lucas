@@ -35,21 +35,41 @@ ALLOWED_HOSTS = []
 
 # Application definition
 
-INSTALLED_APPS = [
+# Apps compartidas (esquema público)
+SHARED_APPS = [
+    "django_tenants",  # Debe ir PRIMERO
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "user",
-    "company",
-    "emails",
-    "imap_handler",
-    "telegram_bot",  # Nueva aplicación para Telegram
+    
+    # Apps del tenant
+    "company",  # Contiene el modelo tenant
 ]
 
+# Apps específicas del tenant (esquema privado)
+TENANT_APPS = [
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+    
+    # Apps de negocio
+    "user",
+    "emails",
+    "imap_handler", 
+    "telegram_bot",
+]
+
+INSTALLED_APPS = list(SHARED_APPS) + [app for app in TENANT_APPS if app not in SHARED_APPS]
+
 MIDDLEWARE = [
+    "django_tenants.middleware.main.TenantMainMiddleware",  # DEBE ir PRIMERO
+    "company.middleware.TenantAdminMiddleware",  # Configurar admin según esquema
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -71,6 +91,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "company.context_processors.schema_context",
             ],
         },
     },
@@ -84,7 +105,7 @@ WSGI_APPLICATION = "app.wsgi.application"
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.postgresql",
+        "ENGINE": "django_tenants.postgresql_backend",
         "NAME": os.getenv("POSTGRES_DB", "distribuidora_lucas"),
         "USER": os.getenv("POSTGRES_USER", "postgres"),
         "PASSWORD": os.getenv("POSTGRES_PASSWORD", "postgres"),
@@ -237,3 +258,20 @@ LOGGING = {
 
 # Crear directorio de logs si no existe
 os.makedirs(BASE_DIR / "logs", exist_ok=True)
+
+# ==================================
+# CONFIGURACIÓN DJANGO TENANTS
+# ==================================
+
+# Modelo de tenant
+TENANT_MODEL = "company.Company"
+
+# Modelo de dominio
+TENANT_DOMAIN_MODEL = "company.Domain"
+
+# Configuración de la base de datos para tenants
+DATABASE_ROUTERS = ("django_tenants.routers.TenantSyncRouter",)
+
+# Configuración del esquema público
+PUBLIC_SCHEMA_NAME = "public"
+PUBLIC_SCHEMA_URLCONF = "app.urls_public"

@@ -37,15 +37,6 @@ class ReceivedEmail(models.Model):
         help_text="Fecha y hora en que se recibió el email",
     )
 
-    # Relaciones
-    company = models.ForeignKey(
-        "company.Company",
-        on_delete=models.CASCADE,
-        related_name="received_emails",
-        verbose_name="Empresa",
-        help_text="Empresa a la que corresponde este email",
-    )
-
     # Datos de procesamiento
     priority = models.CharField(
         max_length=20,
@@ -103,7 +94,6 @@ class ReceivedEmail(models.Model):
         verbose_name_plural = "Emails Recibidos"
         ordering = ["-received_date"]
         indexes = [
-            models.Index(fields=["company", "status"]),
             models.Index(fields=["received_date"]),
             models.Index(fields=["status"]),
             models.Index(fields=["priority"]),

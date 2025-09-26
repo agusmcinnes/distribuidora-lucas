@@ -1,7 +1,8 @@
 from django.db import models
+from django_tenants.models import TenantMixin, DomainMixin
 
 
-class Company(models.Model):
+class Company(TenantMixin):
     """
     Modelo que representa una empresa distribuidora.
     """
@@ -36,3 +37,10 @@ class Company(models.Model):
         return self.users.filter(is_active=True).count()
 
     get_active_users_count.short_description = "Usuarios activos"
+
+
+class Domain(DomainMixin):
+    """
+    Dominios asociados a cada tenant (empresa)
+    """
+    pass

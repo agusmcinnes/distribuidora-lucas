@@ -14,7 +14,6 @@ class ReceivedEmailAdmin(admin.ModelAdmin):
     list_display = [
         "short_subject",
         "sender",
-        "company",
         "priority_display",
         "status_display",
         "assigned_to",
@@ -24,7 +23,6 @@ class ReceivedEmailAdmin(admin.ModelAdmin):
     list_filter = [
         "status",
         "priority",
-        "company",
         "assigned_to__role__type",
         "received_date",
         "created_at",
@@ -45,7 +43,7 @@ class ReceivedEmailAdmin(admin.ModelAdmin):
             "Información del Email",
             {"fields": ("sender", "subject", "body", "received_date")},
         ),
-        ("Procesamiento", {"fields": ("company", "priority", "status", "assigned_to")}),
+        ("Procesamiento", {"fields": ("priority", "status", "assigned_to")}),
         (
             "Seguimiento",
             {
@@ -112,7 +110,7 @@ class ReceivedEmailAdmin(admin.ModelAdmin):
         return (
             super()
             .get_queryset(request)
-            .select_related("company", "assigned_to", "assigned_to__role")
+            .select_related("assigned_to", "assigned_to__role")
         )
 
     # Acciones personalizadas
@@ -156,13 +154,12 @@ class ReceivedEmailAdmin(admin.ModelAdmin):
     mark_as_ignored.short_description = "Marcar como ignorados"
 
     def assign_to_managers(self, request, queryset):
-        """Asigna emails a managers de las respectivas empresas"""
+        """Asigna emails a managers del tenant actual"""
         from user.models import User
 
         count = 0
         for email in queryset:
             managers = User.objects.filter(
-                company=email.company,
                 role__type="manager",
                 is_active=True,
                 can_receive_alerts=True,
@@ -176,13 +173,12 @@ class ReceivedEmailAdmin(admin.ModelAdmin):
     assign_to_managers.short_description = "Asignar a managers"
 
     def assign_to_supervisors(self, request, queryset):
-        """Asigna emails a supervisores de las respectivas empresas"""
+        """Asigna emails a supervisores del tenant actual"""
         from user.models import User
 
         count = 0
         for email in queryset:
             supervisors = User.objects.filter(
-                company=email.company,
                 role__type="supervisor",
                 is_active=True,
                 can_receive_alerts=True,

@@ -14,66 +14,91 @@ logger = logging.getLogger(__name__)
 @shared_task(bind=True, name="imap_handler.tasks.process_imap_emails_task")
 def process_imap_emails_task(self):
     """
-    Tarea programada para procesar emails IMAP de manera asíncrona
+    Tarea programada para procesar emails IMAP de manera asíncrona para todos los tenants
     """
     try:
         # Importar aquí para evitar circular imports
         from .services import IMAPService
         from .models import IMAPConfiguration
         from company.models import Company
+        from django_tenants.utils import tenant_context
 
         logger.info(
             f"🚀 Iniciando procesamiento IMAP programado - Task ID: {self.request.id}"
         )
 
-        # Crear o actualizar configuración basada en variables de entorno
-        company, _ = Company.objects.get_or_create(
-            name="Distribuidora Lucas", defaults={"is_active": True}
-        )
-
-        config, created = IMAPConfiguration.objects.get_or_create(
-            name="Gmail Distribuidora",
-            defaults={
-                "company": company,
-                "host": settings.IMAP_HOST,
-                "port": settings.IMAP_PORT,
-                "username": settings.IMAP_EMAIL,
-                "password": settings.IMAP_PASSWORD,
-                "use_ssl": settings.IMAP_USE_SSL,
-                "inbox_folder": settings.IMAP_FOLDER_INBOX,
-                "processed_folder": settings.IMAP_FOLDER_PROCESSED,
-                "is_active": True,
-                "max_emails_per_check": settings.IMAP_BATCH_SIZE,
-            },
-        )
-
-        # Si no es nueva, actualizar con valores del .env
-        if not created:
-            config.company = company
-            config.host = settings.IMAP_HOST
-            config.port = settings.IMAP_PORT
-            config.username = settings.IMAP_EMAIL
-            config.password = settings.IMAP_PASSWORD
-            config.use_ssl = settings.IMAP_USE_SSL
-            config.inbox_folder = settings.IMAP_FOLDER_INBOX
-            config.processed_folder = settings.IMAP_FOLDER_PROCESSED
-            config.max_emails_per_check = settings.IMAP_BATCH_SIZE
-            config.save()
-
-        # Procesar emails
         service = IMAPService()
-        result = service.process_emails_for_config(config)
+        total_processed = 0
+        total_failed = 0
+        results_by_company = {}
+
+        # Procesar emails para todas las empresas activas
+        companies = Company.objects.filter(is_active=True).exclude(schema_name='public')
+        
+        for company in companies:
+            try:
+                with tenant_context(company):
+                    logger.info(f"📧 Procesando emails para {company.name}")
+                    
+                    # Obtener o crear configuración IMAP para este tenant
+                    config, created = IMAPConfiguration.objects.get_or_create(
+                        name="Gmail Configuration",
+                        defaults={
+                            "host": settings.IMAP_HOST,
+                            "port": settings.IMAP_PORT,
+                            "username": settings.IMAP_EMAIL,
+                            "password": settings.IMAP_PASSWORD,
+                            "use_ssl": settings.IMAP_USE_SSL,
+                            "inbox_folder": settings.IMAP_FOLDER_INBOX,
+                            "processed_folder": settings.IMAP_FOLDER_PROCESSED,
+                            "is_active": True,
+                            "max_emails_per_check": settings.IMAP_BATCH_SIZE,
+                        },
+                    )
+
+                    # Actualizar configuración con valores del .env
+                    if not created:
+                        config.host = settings.IMAP_HOST
+                        config.port = settings.IMAP_PORT
+                        config.username = settings.IMAP_EMAIL
+                        config.password = settings.IMAP_PASSWORD
+                        config.use_ssl = settings.IMAP_USE_SSL
+                        config.inbox_folder = settings.IMAP_FOLDER_INBOX
+                        config.processed_folder = settings.IMAP_FOLDER_PROCESSED
+                        config.max_emails_per_check = settings.IMAP_BATCH_SIZE
+                        config.save()
+
+                    # Procesar emails para este tenant
+                    result = service.process_emails_for_config(config)
+                    
+                    company_processed = result.get('processed', 0)
+                    company_failed = result.get('failed', 0)
+                    
+                    total_processed += company_processed
+                    total_failed += company_failed
+                    
+                    results_by_company[company.name] = {
+                        'processed': company_processed,
+                        'failed': company_failed
+                    }
+                    
+                    logger.info(f"✅ {company.name}: {company_processed} procesados, {company_failed} fallidos")
+                    
+            except Exception as e:
+                logger.error(f"❌ Error procesando emails para {company.name}: {str(e)}")
+                results_by_company[company.name] = {'error': str(e)}
 
         logger.info(
-            f"✅ Tarea IMAP completada - Procesados: {result.get('processed', 0)}, Fallidos: {result.get('failed', 0)}"
+            f"✅ Tarea IMAP completada - Total Procesados: {total_processed}, Total Fallidos: {total_failed}"
         )
 
         return {
             "status": "success",
             "task_id": self.request.id,
             "timestamp": timezone.now().isoformat(),
-            "config_name": config.name,
-            "result": result,
+            "total_processed": total_processed,
+            "total_failed": total_failed,
+            "results_by_company": results_by_company,
         }
 
     except Exception as e:
@@ -162,56 +187,98 @@ def test_imap_connection_task(self, config_id=None):
 
 
 @shared_task(name="imap_handler.tasks.send_telegram_alert_task")
-def send_telegram_alert_task(user_id, message, priority="medium"):
+def send_telegram_alert_task(tenant_schema, chat_id, message, priority="medium"):
     """
-    Enviar alerta por Telegram (preparado para implementación futura)
+    Enviar alerta por Telegram para un tenant específico
     """
     try:
-        # Aquí irá la lógica de Telegram cuando se implemente
-        logger.info(
-            f"📱 Alerta Telegram preparada para usuario {user_id}: {message} (Prioridad: {priority})"
-        )
+        from company.models import Company
+        from django_tenants.utils import tenant_context
+        
+        # Obtener el tenant por su schema
+        company = Company.objects.get(schema_name=tenant_schema)
+        
+        with tenant_context(company):
+            from telegram_bot.services import TelegramService
+            
+            logger.info(
+                f"📱 Enviando alerta Telegram a {company.name}, chat {chat_id}: {message[:50]}... (Prioridad: {priority})"
+            )
+            
+            # Usar el servicio de Telegram
+            telegram_service = TelegramService()
+            result = telegram_service.send_message(chat_id, message, priority)
+            
+            logger.info(f"✅ Telegram enviado: {result.get('status', 'unknown')}")
+            
+            return {
+                "status": "success",
+                "company": company.name,
+                "chat_id": chat_id,
+                "message": message[:100] + "..." if len(message) > 100 else message,
+                "priority": priority,
+                "timestamp": timezone.now().isoformat(),
+                "telegram_result": result
+            }
 
-        # Por ahora solo logueamos, más adelante se implementará el bot
-        return {
-            "status": "success",
-            "user_id": user_id,
-            "message": message[:100] + "..." if len(message) > 100 else message,
-            "priority": priority,
-            "timestamp": timezone.now().isoformat(),
-        }
-
+    except Company.DoesNotExist:
+        error_msg = f"Tenant {tenant_schema} no encontrado"
+        logger.error(error_msg)
+        return {"status": "error", "message": error_msg}
     except Exception as e:
         logger.error(f"❌ Error en alerta Telegram: {str(e)}")
-        return {"status": "error", "message": str(e), "user_id": user_id}
+        return {"status": "error", "message": str(e), "tenant_schema": tenant_schema}
 
 
 @shared_task(name="imap_handler.tasks.cleanup_old_emails_task")
 def cleanup_old_emails_task(days_old=30):
     """
-    Limpiar emails antiguos para mantener la base de datos eficiente
+    Limpiar emails antiguos para mantener la base de datos eficiente en todos los tenants
     """
     try:
         from emails.models import ReceivedEmail
         from datetime import timedelta
+        from company.models import Company
+        from django_tenants.utils import tenant_context
 
         cutoff_date = timezone.now() - timedelta(days=days_old)
-        old_emails = ReceivedEmail.objects.filter(received_date__lt=cutoff_date)
-        count = old_emails.count()
+        total_deleted = 0
+        results_by_company = {}
 
-        if count > 0:
-            old_emails.delete()
-            logger.info(
-                f"🧹 Limpieza completada: {count} emails eliminados (más de {days_old} días)"
-            )
-        else:
-            logger.info(
-                f"🧹 No hay emails antiguos para limpiar (más de {days_old} días)"
-            )
+        # Limpiar emails en todos los tenants
+        companies = Company.objects.filter(is_active=True).exclude(schema_name='public')
+        
+        for company in companies:
+            try:
+                with tenant_context(company):
+                    old_emails = ReceivedEmail.objects.filter(received_date__lt=cutoff_date)
+                    count = old_emails.count()
+                    
+                    if count > 0:
+                        old_emails.delete()
+                        logger.info(
+                            f"🧹 {company.name}: {count} emails eliminados (más de {days_old} días)"
+                        )
+                    else:
+                        logger.info(
+                            f"🧹 {company.name}: No hay emails antiguos para limpiar"
+                        )
+                    
+                    total_deleted += count
+                    results_by_company[company.name] = count
+                    
+            except Exception as e:
+                logger.error(f"❌ Error limpiando {company.name}: {str(e)}")
+                results_by_company[company.name] = f"Error: {str(e)}"
+
+        logger.info(
+            f"🧹 Limpieza completada: {total_deleted} emails eliminados total (más de {days_old} días)"
+        )
 
         return {
             "status": "success",
-            "emails_deleted": count,
+            "total_emails_deleted": total_deleted,
+            "results_by_company": results_by_company,
             "days_old": days_old,
             "timestamp": timezone.now().isoformat(),
         }

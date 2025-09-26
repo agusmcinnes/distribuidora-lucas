@@ -103,3 +103,63 @@ class TelegramNotificationService:
         except Exception as e:
             logger.error(f"Error enviando mensaje a chat {chat_id}: {e}")
             return False
+
+
+class TelegramService:
+    """
+    Wrapper del servicio de Telegram para compatibilidad con tareas de Celery
+    """
+
+    def __init__(self):
+        """Inicializar el servicio"""
+        try:
+            self.notification_service = TelegramNotificationService()
+        except ValueError:
+            logger.warning("No hay configuración de Telegram activa")
+            self.notification_service = None
+
+    def send_message(self, chat_id, message, priority="medium"):
+        """
+        Enviar mensaje directo a un chat específico
+        """
+        try:
+            if not self.notification_service:
+                logger.warning("Servicio de Telegram no disponible")
+                return {"status": "error", "message": "No hay configuración activa"}
+
+            # Intentar enviar el mensaje directamente
+            success = self.notification_service._send_message(chat_id, message)
+            
+            if success:
+                return {
+                    "status": "success",
+                    "chat_id": chat_id,
+                    "message": "Mensaje enviado exitosamente"
+                }
+            else:
+                return {
+                    "status": "error",
+                    "chat_id": chat_id,
+                    "message": "Error enviando mensaje"
+                }
+
+        except Exception as e:
+            logger.error(f"Error en TelegramService.send_message: {e}")
+            return {
+                "status": "error",
+                "message": str(e)
+            }
+
+    def send_email_alert(self, email):
+        """
+        Enviar alerta por nuevo email usando el servicio principal
+        """
+        try:
+            if not self.notification_service:
+                return False
+
+            return self.notification_service.send_email_alert(email)
+
+        except Exception as e:
+            logger.error(f"Error enviando alerta de email: {e}")
+            return False
