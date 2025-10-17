@@ -45,6 +45,7 @@ class UserAdmin(admin.ModelAdmin):
     """
 
     list_display = [
+        "id",
         "name",
         "email",
         "role",
@@ -62,7 +63,7 @@ class UserAdmin(admin.ModelAdmin):
         "created_at",
         "updated_at",
     ]
-    search_fields = ["name", "email", "phone_number", "telegram_chat_id"]
+    search_fields = ["id", "name", "email", "phone_number", "telegram_chat_id"]
     readonly_fields = [
         "created_at",
         "updated_at",

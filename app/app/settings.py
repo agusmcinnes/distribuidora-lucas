@@ -44,9 +44,10 @@ SHARED_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    
+
     # Apps del tenant
     "company",  # Contiene el modelo tenant
+    "telegram_bot",  # Bot centralizado para todas las empresas
 ]
 
 # Apps específicas del tenant (esquema privado)
@@ -57,12 +58,11 @@ TENANT_APPS = [
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    
+
     # Apps de negocio
     "user",
     "emails",
-    "imap_handler", 
-    "telegram_bot",
+    "imap_handler",
 ]
 
 INSTALLED_APPS = list(SHARED_APPS) + [app for app in TENANT_APPS if app not in SHARED_APPS]

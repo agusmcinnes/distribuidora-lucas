@@ -181,11 +181,7 @@ block.super }}
     background: #1976d2;
   }
 </style>
-{% endblock %}
-
-{% block content %}
-
-{% if is_public_schema %}
+{% endblock %} {% block content %} {% if is_public_schema %}
 <div class="quick-actions">
   <h3>🚀 Acciones Rápidas</h3>
   <p>Gestiona las empresas distribuidoras desde aquí:</p>
@@ -202,9 +198,7 @@ block.super }}
     📊 Dashboard Multi-Tenant
   </a>
 </div>
-{% endif %}
-
-{% if is_public_schema and companies_count is not None %}
+{% endif %} {% if is_public_schema and companies_count is not None %}
 <div class="tenant-summary">
   <h4>📈 Resumen del Sistema</h4>
   <div class="stats-grid">
@@ -226,72 +220,8 @@ block.super }}
     </div>
   </div>
 </div>
-{% endif %}
-
-{% if is_public_schema %}
-<div class="dashboard-info">
-  <h3>📊 Dashboard Cross-Tenant</h3>
-  <p>
-    Como super administrador, puedes acceder al dashboard integrado para ver
-    datos de todas las empresas en tiempo real:
-  </p>
-  <a href="/cross-tenant-dashboard/" class="cross-tenant-dashboard-link">
-    🚀 Ver Dashboard Multi-Tenant
-  </a>
-</div>
-{% endif %}
-
-{% if is_tenant_schema %}
+{% endif %} {% if is_public_schema %} {% endif %} {% if is_tenant_schema %}
 <div class="company-welcome">
   <h2>🏢 Panel de Administración de Empresa</h2>
-  <p>Gestiona los recursos y configuración específicos de tu empresa</p>
 </div>
-
-<div class="company-info">
-  <h3>📋 Funcionalidades Disponibles</h3>
-  <div class="info-grid">
-    <div class="info-card">
-      <div class="info-title">👥 Gestión de Usuarios</div>
-      <div class="info-description">
-        Administra los usuarios de tu empresa, roles y permisos de acceso
-      </div>
-    </div>
-    <div class="info-card">
-      <div class="info-title">📧 Sistema de Emails</div>
-      <div class="info-description">
-        Monitorea y gestiona los emails recibidos y las alertas generadas
-      </div>
-    </div>
-    <div class="info-card">
-      <div class="info-title">⚙️ Configuración IMAP</div>
-      <div class="info-description">
-        Configura la conexión con tu servidor de email para recibir mensajes
-      </div>
-    </div>
-    <div class="info-card">
-      <div class="info-title">🤖 Bot de Telegram</div>
-      <div class="info-description">
-        Configura las alertas automáticas por Telegram para tu equipo
-      </div>
-    </div>
-  </div>
-</div>
-
-<div class="quick-links">
-  <h3>🚀 Acceso Rápido</h3>
-  <p>Enlaces directos a las secciones más utilizadas:</p>
-
-  {% for app in available_apps %}
-    {% for model in app.models %}
-      {% if model.perms.change or model.perms.add %}
-        <a href="{{ model.admin_url }}" class="link-button">
-          {{ model.name }}
-        </a>
-      {% endif %}
-    {% endfor %}
-  {% endfor %}
-</div>
-{% endif %}
-
-{{ block.super }}
-{% endblock %}
+{% endif %} {{ block.super }} {% endblock %}

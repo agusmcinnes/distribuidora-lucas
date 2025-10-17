@@ -1,5 +1,6 @@
 """
 Modelos para la gestión del bot de Telegram
+Estos modelos están en SHARED_APPS para permitir un bot centralizado
 """
 
 from django.db import models
@@ -38,6 +39,7 @@ class TelegramConfig(models.Model):
 class TelegramChat(models.Model):
     """
     Chats de Telegram donde enviar alertas
+    Cada chat está asociado a una empresa (tenant) específica y a un bot
     """
 
     CHAT_TYPE_CHOICES = [
@@ -54,6 +56,24 @@ class TelegramChat(models.Model):
         ("all", "Todas"),
     ]
 
+    company = models.ForeignKey(
+        "company.Company",
+        on_delete=models.CASCADE,
+        related_name="telegram_chats",
+        verbose_name="Empresa",
+        help_text="Empresa a la que pertenece este chat",
+        null=True,  # Temporal para migración inicial
+        blank=True,
+    )
+    bot = models.ForeignKey(
+        TelegramConfig,
+        on_delete=models.CASCADE,
+        related_name="chats",
+        verbose_name="Bot de Telegram",
+        help_text="Bot que enviará mensajes a este chat",
+        null=True,  # Temporal para migración inicial
+        blank=True,
+    )
     name = models.CharField(max_length=100, verbose_name="Nombre del chat")
     chat_id = models.BigIntegerField(
         unique=True,
@@ -106,12 +126,13 @@ class TelegramChat(models.Model):
         verbose_name_plural = "Chats de Telegram"
 
     def __str__(self):
-        return f"{self.name} ({self.chat_id})"
+        return f"{self.name} - {self.company.name} ({self.chat_id})"
 
 
 class TelegramMessage(models.Model):
     """
     Registro de mensajes enviados por Telegram
+    Cada mensaje está asociado a una empresa para facilitar el tracking
     """
 
     STATUS_CHOICES = [
@@ -127,6 +148,15 @@ class TelegramMessage(models.Model):
         ("manual", "Manual"),
     ]
 
+    company = models.ForeignKey(
+        "company.Company",
+        on_delete=models.CASCADE,
+        related_name="telegram_messages",
+        verbose_name="Empresa",
+        help_text="Empresa a la que pertenece este mensaje",
+        null=True,  # Temporal para migración inicial
+        blank=True,
+    )
     chat = models.ForeignKey(
         TelegramChat, on_delete=models.CASCADE, verbose_name="Chat"
     )
@@ -169,4 +199,4 @@ class TelegramMessage(models.Model):
         ordering = ["-created_at"]
 
     def __str__(self):
-        return f"{self.subject} -> {self.chat.name} ({self.status})"
+        return f"{self.company.name}: {self.subject} -> {self.chat.name} ({self.status})"

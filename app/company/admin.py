@@ -2,7 +2,7 @@ from django.contrib import admin
 from django.utils.html import format_html
 from django.contrib.auth.models import User as DjangoUser
 from django.contrib.auth.hashers import make_password
-from django.db import transaction
+from django.db import transaction, connection
 from django.forms import ModelForm, CharField, EmailField, PasswordInput
 from django.core.exceptions import ValidationError
 from django_tenants.utils import tenant_context, get_tenant_model
@@ -195,6 +195,10 @@ class CompanyAdmin(admin.ModelAdmin):
     get_domain_display.short_description = "Dominio Principal"
     get_domain_display.allow_tags = True
 
+    def has_module_permission(self, request):
+        """Solo mostrar en esquema público (superadmin)"""
+        return connection.schema_name == "public"
+
     def save_model(self, request, obj, form, change):
         """Guarda la empresa y crea el setup completo si es nueva"""
         if not change:  # Nueva empresa
@@ -280,15 +284,18 @@ class DomainAdmin(admin.ModelAdmin):
     list_filter = ['is_primary']
     search_fields = ['domain', 'tenant__name']
 
+    def has_module_permission(self, request):
+        """Solo mostrar en esquema público (superadmin)"""
+        return connection.schema_name == "public"
 
-# Registro condicional de admins - solo en esquema público
-def register_public_schema_admin():
-    """Registra los admins solo cuando estamos en el esquema público"""
-    from django.db import connection
-    
-    if connection.schema_name == 'public':
-        try:
-            admin.site.register(Company, CompanyAdmin)
-            admin.site.register(Domain, DomainAdmin)
-        except admin.sites.AlreadyRegistered:
-            pass
+
+# Registrar siempre los admins (el middleware se encarga de filtrarlos)
+try:
+    admin.site.register(Company, CompanyAdmin)
+except admin.sites.AlreadyRegistered:
+    pass
+
+try:
+    admin.site.register(Domain, DomainAdmin)
+except admin.sites.AlreadyRegistered:
+    pass
