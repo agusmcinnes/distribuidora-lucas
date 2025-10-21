@@ -3,7 +3,12 @@
     "allow": [
       "Bash(docker exec:*)",
       "Bash(docker restart:*)",
-      "Bash(docker logs:*)"
+      "Bash(docker logs:*)",
+      "Bash(docker-compose exec web python manage.py makemigrations:*)",
+      "Bash(docker-compose exec:*)",
+      "Bash(docker-compose logs:*)",
+      "Bash(docker-compose ps:*)",
+      "Bash(docker-compose restart:*)"
     ],
     "deny": [],
     "ask": []

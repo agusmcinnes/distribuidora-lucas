@@ -79,6 +79,28 @@ services:
     networks:
       - distribuidora_network
 
+  # Bot de Telegram (para procesar comandos /register)
+  telegram-bot:
+    build: .
+    command: python -u manage.py run_telegram_bot --daemon
+    volumes:
+      - .:/code
+    depends_on:
+      - db
+      - redis
+    environment:
+      - DEBUG=True
+      - DATABASE_URL=postgresql://postgres:postgres@db:5432/distribuidora_lucas
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - PYTHONPATH=/code/app:.
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    networks:
+      - distribuidora_network
+    restart: unless-stopped
+
 volumes:
   postgres_data:
 

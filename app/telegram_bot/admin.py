@@ -8,7 +8,8 @@ from django.db import connection
 from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
-from .models import TelegramConfig, TelegramChat, TelegramMessage
+from django.utils import timezone
+from .models import TelegramConfig, TelegramChat, TelegramMessage, TelegramRegistrationCode
 
 
 # ==============================================================================
@@ -340,6 +341,110 @@ class PublicTelegramMessageAdmin(admin.ModelAdmin):
         self.message_user(request, f"Se marcaron {count} mensajes para reintento.")
 
     retry_failed_messages.short_description = "Reintentar mensajes fallidos"
+
+
+class PublicTelegramRegistrationCodeAdmin(admin.ModelAdmin):
+    """
+    Admin para códigos de registro de Telegram en esquema público
+    Permite al superadmin ver y generar códigos para todas las empresas
+    """
+
+    list_display = [
+        "code",
+        "company",
+        "created_by",
+        "status_display",
+        "expires_at",
+        "used_at",
+        "used_by_chat",
+        "created_at",
+    ]
+    list_filter = [
+        "company",
+        "is_used",
+        "created_at",
+        "expires_at",
+        "used_at",
+    ]
+    search_fields = ["code", "company__name", "notes", "created_by__username"]
+    readonly_fields = ["code", "created_at", "updated_at", "used_at", "used_by_chat"]
+
+    fieldsets = (
+        (
+            "Información del Código",
+            {
+                "fields": ("code", "company", "created_by"),
+                "description": "El código se genera automáticamente al crear",
+            },
+        ),
+        (
+            "Configuración",
+            {
+                "fields": ("expires_at", "notes"),
+                "description": "Fecha de expiración (default: 7 días desde creación)",
+            },
+        ),
+        (
+            "Estado de Uso",
+            {
+                "fields": ("is_used", "used_at", "used_by_chat"),
+                "classes": ("collapse",),
+            },
+        ),
+        ("Fechas", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
+    )
+
+    actions = ["mark_as_expired", "delete_unused_codes"]
+
+    def get_queryset(self, request):
+        """Solo mostrar en esquema público"""
+        qs = super().get_queryset(request)
+        if connection.schema_name != "public":
+            return qs.none()
+        return qs.select_related("company", "created_by", "used_by_chat")
+
+    def has_module_permission(self, request):
+        """Solo mostrar el módulo en esquema público"""
+        return connection.schema_name == "public"
+
+    def status_display(self, obj):
+        """Muestra el estado del código con colores"""
+        if obj.is_used:
+            return format_html(
+                '<span style="color: gray; font-weight: bold;">✓ Usado</span>'
+            )
+        elif obj.is_expired():
+            return format_html(
+                '<span style="color: red; font-weight: bold;">⏱ Expirado</span>'
+            )
+        else:
+            return format_html(
+                '<span style="color: green; font-weight: bold;">✓ Activo</span>'
+            )
+
+    status_display.short_description = "Estado"
+
+    def save_model(self, request, obj, form, change):
+        """Auto-asignar el usuario que crea el código"""
+        if not change:  # Solo en creación
+            obj.created_by = request.user
+        super().save_model(request, obj, form, change)
+
+    def mark_as_expired(self, request, queryset):
+        """Marcar códigos como expirados (estableciendo expires_at a ahora)"""
+        count = queryset.filter(is_used=False).update(expires_at=timezone.now())
+        self.message_user(request, f"Se marcaron {count} códigos como expirados.")
+
+    mark_as_expired.short_description = "Marcar como expirados"
+
+    def delete_unused_codes(self, request, queryset):
+        """Eliminar códigos no usados"""
+        unused = queryset.filter(is_used=False)
+        count = unused.count()
+        unused.delete()
+        self.message_user(request, f"Se eliminaron {count} códigos no usados.")
+
+    delete_unused_codes.short_description = "Eliminar códigos no usados"
 
 
 # ==============================================================================
@@ -700,6 +805,214 @@ class TenantTelegramMessageAdmin(admin.ModelAdmin):
     retry_failed_messages.short_description = "Reintentar mensajes fallidos"
 
 
+class TenantTelegramRegistrationCodeAdmin(admin.ModelAdmin):
+    """
+    Admin para códigos de registro de Telegram en esquema tenant
+    Solo muestra los códigos de la empresa actual
+    """
+
+    list_display = [
+        "code",
+        "status_display",
+        "expires_at",
+        "used_at",
+        "chat_display",
+        "created_at",
+    ]
+    list_filter = [
+        "is_used",
+        "created_at",
+        "expires_at",
+    ]
+    search_fields = ["code", "notes"]
+    readonly_fields = ["code", "created_at", "updated_at", "used_at", "used_by_chat", "registration_instructions"]
+
+    fieldsets = (
+        (
+            "📋 Instrucciones de Registro",
+            {
+                "fields": ("registration_instructions",),
+                "description": "Comparte el código generado con los usuarios de tu compañía",
+            },
+        ),
+        (
+            "Información del Código",
+            {
+                "fields": ("code", "company", "created_by"),
+                "description": "El código se genera automáticamente al crear",
+            },
+        ),
+        (
+            "Configuración",
+            {
+                "fields": ("expires_at", "notes"),
+                "description": "Fecha de expiración y notas adicionales",
+            },
+        ),
+        (
+            "Estado de Uso",
+            {
+                "fields": ("is_used", "used_at", "used_by_chat"),
+                "classes": ("collapse",),
+            },
+        ),
+        ("Fechas", {"fields": ("created_at", "updated_at"), "classes": ("collapse",)}),
+    )
+
+    actions = ["mark_as_expired"]
+
+    def get_queryset(self, request):
+        """Solo mostrar códigos de la empresa actual"""
+        qs = super().get_queryset(request)
+
+        # No mostrar en esquema público
+        if connection.schema_name == "public":
+            return qs.none()
+
+        # Obtener la empresa actual del tenant
+        from company.models import Company
+        try:
+            current_company = Company.objects.get(schema_name=connection.schema_name)
+            # No usar select_related con used_by_chat porque la tabla está en public schema
+            return qs.filter(company=current_company).select_related("created_by")
+        except Company.DoesNotExist:
+            return qs.none()
+
+    def has_module_permission(self, request):
+        """Solo mostrar el módulo en esquemas tenant"""
+        return connection.schema_name != "public"
+
+    def status_display(self, obj):
+        """Muestra el estado del código con colores"""
+        if obj.is_used:
+            return format_html(
+                '<span style="color: gray; font-weight: bold;">✓ Usado</span>'
+            )
+        elif obj.is_expired():
+            return format_html(
+                '<span style="color: red; font-weight: bold;">⏱ Expirado</span>'
+            )
+        else:
+            return format_html(
+                '<span style="color: green; font-weight: bold;">✓ Activo</span>'
+            )
+
+    status_display.short_description = "Estado"
+
+    def chat_display(self, obj):
+        """Muestra el chat usado de forma segura"""
+        if not obj.used_by_chat_id:
+            return "-"
+
+        # Cambiar temporalmente al esquema público para obtener el chat
+        original_schema = connection.schema_name
+        try:
+            connection.set_schema("public")
+            if obj.used_by_chat:
+                return obj.used_by_chat.name
+            return "-"
+        except Exception:
+            return "Error"
+        finally:
+            connection.set_schema(original_schema)
+
+    chat_display.short_description = "Usado por"
+
+    def _get_used_by_chat_info(self, obj):
+        """Helper para obtener info del chat usado de forma segura"""
+        if not obj.used_by_chat_id:
+            return ''
+
+        original_schema = connection.schema_name
+        try:
+            connection.set_schema("public")
+            if obj.used_by_chat:
+                return f'<p><strong>Usado por:</strong> {obj.used_by_chat.name}</p>'
+            return ''
+        except Exception:
+            return '<p><strong>Usado por:</strong> Error al cargar</p>'
+        finally:
+            connection.set_schema(original_schema)
+
+    def registration_instructions(self, obj):
+        """Muestra instrucciones para usar el código"""
+        instructions_html = f"""
+        <div style="font-family: Arial; background: #e3f2fd; padding: 20px; border-radius: 8px; border: 2px solid #2196f3;">
+            <h3 style="color: #1565c0; margin-top: 0;">🎫 Cómo usar este código de registro</h3>
+
+            <div style="background: white; padding: 15px; border-radius: 5px; margin: 10px 0;">
+                <h4 style="color: #1976d2; margin-top: 0;">Paso 1: Comparte el código</h4>
+                <p>Envía este código al usuario que desea recibir notificaciones:</p>
+                <div style="background: #f5f5f5; padding: 15px; border-radius: 5px; text-align: center; margin: 10px 0;">
+                    <code style="font-size: 24px; font-weight: bold; color: #1565c0; letter-spacing: 2px;">{obj.code if obj.pk else 'XXXXXXXX'}</code>
+                </div>
+            </div>
+
+            <div style="background: white; padding: 15px; border-radius: 5px; margin: 10px 0;">
+                <h4 style="color: #1976d2; margin-top: 0;">Paso 2: El usuario registra su chat</h4>
+                <ol>
+                    <li>El usuario debe buscar el bot de Telegram de la compañía</li>
+                    <li>Si usa un grupo, debe agregar el bot al grupo</li>
+                    <li>En el chat/grupo, escribir: <code style="background: #f5f5f5; padding: 3px 8px; border-radius: 3px;">/register {obj.code if obj.pk else 'CODIGO'}</code></li>
+                    <li>El bot confirmará el registro automáticamente</li>
+                </ol>
+            </div>
+
+            <div style="background: white; padding: 15px; border-radius: 5px; margin: 10px 0;">
+                <h4 style="color: #1976d2; margin-top: 0;">📊 Estado del código</h4>
+                <p><strong>Estado:</strong> {'Usado ✓' if obj.is_used else ('Expirado ⏱' if obj.is_expired() else 'Activo ✓')}</p>
+                <p><strong>Expira:</strong> {obj.expires_at.strftime('%d/%m/%Y %H:%M') if obj.pk else 'N/A'}</p>
+                {self._get_used_by_chat_info(obj) if obj.is_used and obj.used_by_chat_id else ''}
+            </div>
+
+            <div style="background: #fff3cd; padding: 15px; border-radius: 5px; margin: 10px 0; border: 1px solid #ffc107;">
+                <p style="margin: 0;"><strong>⚠️ Importante:</strong> Cada código solo puede usarse una vez. Si necesitas registrar múltiples chats, genera un código para cada uno.</p>
+            </div>
+        </div>
+        """
+        return mark_safe(instructions_html)
+
+    registration_instructions.short_description = "Instrucciones de Uso"
+
+    def formfield_for_foreignkey(self, db_field, request, **kwargs):
+        """Customizar los selectores de ForeignKey"""
+        if db_field.name == "company":
+            # Obtener la empresa actual del tenant
+            from company.models import Company
+            try:
+                current_company = Company.objects.get(schema_name=connection.schema_name)
+                kwargs["queryset"] = Company.objects.filter(id=current_company.id)
+                kwargs["initial"] = current_company.id
+            except Company.DoesNotExist:
+                kwargs["queryset"] = Company.objects.none()
+
+        return super().formfield_for_foreignkey(db_field, request, **kwargs)
+
+    def save_model(self, request, obj, form, change):
+        """Auto-asignar la empresa actual y usuario que crea"""
+        if not change:  # Solo en creación
+            from company.models import Company
+
+            # Auto-asignar empresa si no está establecida
+            if not obj.company:
+                try:
+                    obj.company = Company.objects.get(schema_name=connection.schema_name)
+                except Company.DoesNotExist:
+                    pass
+
+            # Auto-asignar usuario creador
+            obj.created_by = request.user
+
+        super().save_model(request, obj, form, change)
+
+    def mark_as_expired(self, request, queryset):
+        """Marcar códigos como expirados"""
+        count = queryset.filter(is_used=False).update(expires_at=timezone.now())
+        self.message_user(request, f"Se marcaron {count} códigos como expirados.")
+
+    mark_as_expired.short_description = "Marcar como expirados"
+
+
 # ==============================================================================
 # REGISTRAR ADMINS
 # ==============================================================================
@@ -740,5 +1053,10 @@ except admin.sites.AlreadyRegistered:
 
 try:
     admin.site.register(TelegramMessage, TenantTelegramMessageAdmin)
+except admin.sites.AlreadyRegistered:
+    pass
+
+try:
+    admin.site.register(TelegramRegistrationCode, TenantTelegramRegistrationCodeAdmin)
 except admin.sites.AlreadyRegistered:
     pass

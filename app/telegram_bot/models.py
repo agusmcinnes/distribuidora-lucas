@@ -3,9 +3,16 @@ Modelos para la gestión del bot de Telegram
 Estos modelos están en SHARED_APPS para permitir un bot centralizado
 """
 
+import secrets
+import string
+from datetime import timedelta
+
 from django.db import models
 from django.utils import timezone
 from django.core.validators import RegexValidator
+from django.contrib.auth import get_user_model
+
+User = get_user_model()
 
 
 class TelegramConfig(models.Model):
@@ -200,3 +207,134 @@ class TelegramMessage(models.Model):
 
     def __str__(self):
         return f"{self.company.name}: {self.subject} -> {self.chat.name} ({self.status})"
+
+
+class TelegramRegistrationCode(models.Model):
+    """
+    Códigos de registro para facilitar la asignación de chats a compañías
+    Permite que los admins generen códigos que los usuarios pueden usar
+    para registrar sus chats automáticamente
+    """
+
+    code = models.CharField(
+        max_length=8,
+        unique=True,
+        verbose_name="Código",
+        help_text="Código único de registro (generado automáticamente)",
+        validators=[
+            RegexValidator(
+                regex=r'^[A-Z0-9]{8}$',
+                message="El código debe tener 8 caracteres alfanuméricos en mayúsculas",
+            )
+        ],
+    )
+    company = models.ForeignKey(
+        "company.Company",
+        on_delete=models.CASCADE,
+        related_name="registration_codes",
+        verbose_name="Empresa",
+        help_text="Empresa a la que se asignará el chat cuando se use este código",
+    )
+    created_by = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="created_registration_codes",
+        verbose_name="Creado por",
+        help_text="Usuario que generó este código",
+    )
+    # Campos para rastrear el usuario asignado (sin ForeignKey por cross-schema)
+    assigned_to_user_email = models.EmailField(
+        null=True,
+        blank=True,
+        verbose_name="Email del usuario asignado",
+        help_text="Email del usuario de la empresa al que se le asignó este código",
+    )
+    assigned_to_user_name = models.CharField(
+        max_length=150,
+        null=True,
+        blank=True,
+        verbose_name="Nombre del usuario asignado",
+        help_text="Nombre del usuario de la empresa al que se le asignó este código",
+    )
+    expires_at = models.DateTimeField(
+        verbose_name="Expira en",
+        help_text="Fecha y hora de expiración del código",
+    )
+    is_used = models.BooleanField(
+        default=False,
+        verbose_name="Usado",
+        help_text="Indica si el código ya fue utilizado",
+    )
+    used_at = models.DateTimeField(
+        null=True,
+        blank=True,
+        verbose_name="Usado en",
+        help_text="Fecha y hora en que se usó el código",
+    )
+    used_by_chat = models.ForeignKey(
+        TelegramChat,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="registration_code_used",
+        verbose_name="Usado por chat",
+        help_text="Chat que utilizó este código para registrarse",
+    )
+    notes = models.TextField(
+        blank=True,
+        verbose_name="Notas",
+        help_text="Notas adicionales sobre este código (opcional)",
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Código de Registro"
+        verbose_name_plural = "Códigos de Registro"
+        ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=['code']),
+            models.Index(fields=['company', 'is_used']),
+        ]
+
+    def __str__(self):
+        status = "Usado" if self.is_used else ("Expirado" if self.is_expired() else "Activo")
+        return f"{self.code} - {self.company.name} ({status})"
+
+    @staticmethod
+    def generate_unique_code():
+        """Genera un código único de 8 caracteres alfanuméricos"""
+        while True:
+            # Generar código alfanumérico de 8 caracteres en mayúsculas
+            code = ''.join(secrets.choice(string.ascii_uppercase + string.digits) for _ in range(8))
+            # Verificar que no exista
+            if not TelegramRegistrationCode.objects.filter(code=code).exists():
+                return code
+
+    def is_expired(self):
+        """Verifica si el código ha expirado"""
+        if not self.expires_at:
+            return False
+        return timezone.now() > self.expires_at
+
+    def is_valid(self):
+        """Verifica si el código es válido (no usado y no expirado)"""
+        return not self.is_used and not self.is_expired()
+
+    def mark_as_used(self, chat):
+        """Marca el código como usado por un chat específico"""
+        self.is_used = True
+        self.used_at = timezone.now()
+        self.used_by_chat = chat
+        self.save()
+
+    def save(self, *args, **kwargs):
+        # Generar código automáticamente si no existe
+        if not self.code:
+            self.code = self.generate_unique_code()
+        # Establecer fecha de expiración por defecto (7 días)
+        if not self.expires_at:
+            self.expires_at = timezone.now() + timedelta(days=7)
+        super().save(*args, **kwargs)

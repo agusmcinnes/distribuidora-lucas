@@ -77,7 +77,12 @@ class Command(BaseCommand):
         )
         self.stdout.write(
             self.style.WARNING(
-                "💡 Los usuarios pueden enviar /get_chat_id en sus grupos para obtener el Chat ID"
+                "💡 Nuevo: Los usuarios pueden registrarse con /register CODIGO"
+            )
+        )
+        self.stdout.write(
+            self.style.WARNING(
+                "📋 Alternativa: /get_chat_id para obtener el Chat ID (método manual)"
             )
         )
         self.stdout.write(
@@ -191,16 +196,19 @@ class Command(BaseCommand):
 
 <b>📛 Nombre:</b> {chat_title}
 <b>🔢 Chat ID:</b> <code>{chat_id}</code>
-<b>📱 Tipo:</b> {chat_type.capitalize()}
+<b>📱 Tipo:</b> Grupo
 
 <b>✅ ¿Cómo usar este ID?</b>
 
-1️⃣ Copia el Chat ID de arriba
-2️⃣ Ve al panel de administración de tu empresa
-3️⃣ En la sección "Chats de Telegram", haz clic en "Agregar"
-4️⃣ Pega el Chat ID y guarda
+<b>Método Recomendado (con código):</b>
+1️⃣ Solicita un código de registro al administrador
+2️⃣ Envía: <code>/register CODIGO</code>
+3️⃣ ¡Listo! Registro automático
 
-¡Listo! Empezarás a recibir notificaciones automáticamente.
+<b>Método Alternativo (manual):</b>
+1️⃣ Copia el Chat ID de arriba
+2️⃣ Comparte el ID con el administrador
+3️⃣ Espera a que configure el chat manualmente
                     """
                 else:
                     response_message = f"""
@@ -210,14 +218,19 @@ class Command(BaseCommand):
 <b>🔢 Chat ID:</b> <code>{chat_id}</code>
 <b>📱 Tipo:</b> Chat Privado
 
-⚠️ <b>Nota:</b> Este es un chat privado. Para recibir notificaciones de tu empresa, debes:
+<b>✅ ¿Cómo usar este ID?</b>
 
-1️⃣ Crear un <b>grupo</b> en Telegram
-2️⃣ Agregar este bot al grupo
-3️⃣ Enviar /get_chat_id en el <b>grupo</b>
-4️⃣ Usar el Chat ID del grupo en el panel de administración
+<b>Método Recomendado (con código):</b>
+1️⃣ Solicita un código de registro al administrador
+2️⃣ Envía: <code>/register CODIGO</code>
+3️⃣ ¡Listo! Registro automático
 
-Los chats privados no son recomendados para notificaciones empresariales.
+<b>Método Alternativo (manual):</b>
+1️⃣ Copia el Chat ID de arriba
+2️⃣ Comparte el ID con el administrador
+3️⃣ Espera a que configure el chat manualmente
+
+💡 <b>Tip:</b> Los chats privados son perfectos para notificaciones personales. Si necesitas compartir con un equipo, usa un grupo.
                     """
 
                 # Enviar respuesta
@@ -237,16 +250,26 @@ Soy el bot de notificaciones de tu empresa.
 
 <b>🔧 Comandos disponibles:</b>
 
+/register CODIGO - Registrar este chat con un código
 /get_chat_id - Obtener el ID de este chat
 /start - Ver este mensaje de bienvenida
 /help - Ayuda sobre cómo configurar
 
-<b>💡 ¿Cómo empezar?</b>
+<b>💡 ¿Cómo empezar? (Método Recomendado)</b>
 
-1️⃣ Agrega este bot a un grupo de Telegram
-2️⃣ Envía /get_chat_id en el grupo
-3️⃣ Copia el Chat ID que te respondo
-4️⃣ Configúralo en el panel de administración
+1️⃣ Solicita un código de registro al administrador
+2️⃣ Envía: <code>/register CODIGO</code>
+3️⃣ ¡Listo! Comenzarás a recibir notificaciones automáticamente
+
+<b>📋 Método Alternativo:</b>
+
+1️⃣ Envía /get_chat_id para obtener el ID del chat
+2️⃣ Comparte el ID con el administrador para configuración manual
+
+<b>📱 Tipos de chat soportados:</b>
+
+• <b>Chats privados:</b> Para notificaciones personales
+• <b>Grupos:</b> Para compartir notificaciones con tu equipo
 
 ¡Es así de fácil! 🚀
                 """
@@ -264,27 +287,35 @@ Soy el bot de notificaciones de tu empresa.
 <b>¿Qué hace este bot?</b>
 Envía notificaciones automáticas cuando llegan emails importantes a tu empresa.
 
-<b>¿Cómo configurarlo?</b>
+<b>🎫 MÉTODO RECOMENDADO - Registro con Código:</b>
 
-<b>Paso 1:</b> Crear o seleccionar un grupo
-• Crea un nuevo grupo en Telegram
-• O usa un grupo existente
-• Agrega este bot al grupo
+<b>Paso 1:</b> Obtén un código
+• Solicita un código de registro al administrador de tu empresa
+• El código tiene formato: ABC12345
 
-<b>Paso 2:</b> Obtener el Chat ID
-• En el grupo, envía: /get_chat_id
-• El bot responderá con el ID numérico
+<b>Paso 2:</b> Registra tu chat
+• Puedes usar un <b>chat privado</b> (solo para ti) o un <b>grupo</b> (para compartir con tu equipo)
+• Si es grupo, agrega este bot al grupo primero
+• Envía: <code>/register CODIGO</code>
+• Ejemplo: <code>/register ABC12345</code>
 
-<b>Paso 3:</b> Configurar en el panel
-• Accede al panel de administración de tu empresa
-• Ve a "Chats de Telegram"
-• Agrega el Chat ID que obtuviste
+<b>Paso 3:</b> ¡Listo!
+• El bot confirmará el registro
+• Comenzarás a recibir notificaciones automáticamente
 
-<b>Paso 4:</b> ¡Listo!
-• El bot empezará a enviar notificaciones automáticamente
-• Recibirás alertas de emails importantes
+<b>📋 MÉTODO ALTERNATIVO - Configuración Manual:</b>
 
-<b>🔧 Comandos:</b>
+Si prefieres el método tradicional:
+• Envía /get_chat_id para obtener tu Chat ID
+• Comparte el ID con el administrador
+• El administrador configurará el chat manualmente
+
+<b>📱 Tipos de chat:</b>
+• <b>Chat privado:</b> Perfecto para notificaciones personales
+• <b>Grupo:</b> Ideal para compartir con tu equipo
+
+<b>🔧 Comandos disponibles:</b>
+/register CODIGO - Registrar con código
 /get_chat_id - Obtener ID del chat
 /start - Mensaje de bienvenida
 /help - Esta ayuda
@@ -293,6 +324,62 @@ Envía notificaciones automáticas cuando llegan emails importantes a tu empresa
                 """
 
                 self._send_message(config, chat_id, help_message)
+
+            elif command == "/register":
+                self.stdout.write(
+                    self.style.SUCCESS(
+                        f"🎫 Comando /register recibido de @{username} en '{chat_title}' (ID: {chat_id})"
+                    )
+                )
+
+                # Extraer el código del mensaje
+                parts = message["text"].split()
+                if len(parts) < 2:
+                    error_message = """
+❌ <b>Error: Falta el código de registro</b>
+
+<b>Uso correcto:</b>
+/register CODIGO
+
+<b>Ejemplo:</b>
+/register ABC12345
+
+<b>¿No tienes un código?</b>
+Solicita un código de registro al administrador de tu empresa.
+                    """
+                    self._send_message(config, chat_id, error_message)
+                    return
+
+                code = parts[1].strip().upper()
+
+                # Recopilar información del chat
+                chat_data = {
+                    'chat_id': chat_id,
+                    'chat_type': chat_type,
+                    'username': chat.get('username', ''),
+                    'title': chat_title if chat_type in ['group', 'supergroup', 'channel'] else '',
+                }
+
+                # Intentar registrar
+                from telegram_bot.services import TelegramRegistrationService
+                result = TelegramRegistrationService.register_chat_with_code(code, chat_data)
+
+                if result['success']:
+                    self.stdout.write(
+                        self.style.SUCCESS(
+                            f"✅ Chat {chat_id} registrado exitosamente con código {code}"
+                        )
+                    )
+                    success_message = result['message']
+                    self._send_message(config, chat_id, success_message)
+                else:
+                    self.stdout.write(
+                        self.style.ERROR(
+                            f"❌ Error registrando chat {chat_id}: {result.get('error_code', 'UNKNOWN')}"
+                        )
+                    )
+                    error_message = result['message']
+                    self._send_message(config, chat_id, error_message)
 
             else:
                 # Comando desconocido

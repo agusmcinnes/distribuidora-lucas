@@ -391,8 +391,9 @@ class IMAPEmailHandler:
                 f"Email creado: {received_email.id} - {email_data['subject'][:50]}"
             )
 
-            # Enviar notificación por Telegram
-            self._send_telegram_notification(received_email)
+            # La notificación por Telegram se envía automáticamente via signal post_save
+            # Ver: telegram_bot/signals.py:send_telegram_alert_on_new_email
+            # NO llamar manualmente para evitar duplicados
 
             # Marcar email como leído en el servidor
             self._mark_email_as_read(email_uid)
@@ -400,6 +401,39 @@ class IMAPEmailHandler:
             # Mover a carpeta procesada si está configurada
             if self.config.processed_folder:
                 self._move_email_to_processed(email_uid)
+
+    def _send_telegram_notification(self, received_email):
+        """
+        Enviar notificación por Telegram para el email recibido
+        """
+        try:
+            from telegram_bot.services import TelegramNotificationService
+            from company.models import Company
+            from django.db import connection
+
+            logger.info(f"📱 DEBUG: _send_telegram_notification LLAMADO para email {received_email.id} - Asunto: {received_email.subject}")
+            logger.info(f"📱 Enviando notificación Telegram para email {received_email.id}")
+
+            # Obtener la empresa del schema actual
+            try:
+                company = Company.objects.get(schema_name=connection.schema_name)
+            except Company.DoesNotExist:
+                logger.warning(f"No se encontró empresa para schema {connection.schema_name}")
+                return
+
+            # Crear el servicio de Telegram
+            telegram_service = TelegramNotificationService(company=company)
+
+            # Enviar alerta usando el método existente
+            success = telegram_service.send_email_alert(received_email, company=company)
+
+            if success:
+                logger.info(f"✅ Notificación Telegram enviada para email {received_email.id}")
+            else:
+                logger.warning(f"⚠️ No se pudo enviar notificación Telegram para email {received_email.id}")
+
+        except Exception as e:
+            logger.error(f"❌ Error enviando notificación Telegram para email {received_email.id}: {str(e)}")
 
     def _apply_processing_rules(self, email_data: Dict) -> Tuple[str, Optional[User]]:
         """
@@ -751,35 +785,3 @@ class IMAPService:
 
         # Por defecto, prioridad media
         return "medium"
-
-    def _send_telegram_notification(self, received_email):
-        """
-        Enviar notificación por Telegram para el email recibido
-        """
-        try:
-            from telegram_bot.services import TelegramService
-            
-            logger.info(f"📱 Enviando notificación Telegram para email {received_email.id}")
-            
-            # Crear el servicio de Telegram
-            telegram_service = TelegramService()
-            
-            # Enviar alerta usando el método existente
-            success = telegram_service.send_email_alert(received_email)
-            
-            if success:
-                logger.info(f"✅ Notificación Telegram enviada para email {received_email.id}")
-                # Marcar como enviado
-                received_email.sent_at = timezone.now()
-                received_email.save(update_fields=['sent_at'])
-            else:
-                logger.warning(f"⚠️ No se pudo enviar notificación Telegram para email {received_email.id}")
-                
-        except Exception as e:
-            logger.error(f"❌ Error enviando notificación Telegram para email {received_email.id}: {str(e)}")
-            # Guardar el error en el email si es posible
-            try:
-                received_email.error_message = f"Error Telegram: {str(e)}"
-                received_email.save(update_fields=['error_message'])
-            except:
-                pass

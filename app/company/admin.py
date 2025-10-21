@@ -1,12 +1,17 @@
 from django.contrib import admin
 from django.utils.html import format_html
+from django.utils.safestring import mark_safe
 from django.contrib.auth.models import User as DjangoUser
 from django.contrib.auth.hashers import make_password
 from django.db import transaction, connection
 from django.forms import ModelForm, CharField, EmailField, PasswordInput
 from django.core.exceptions import ValidationError
 from django_tenants.utils import tenant_context, get_tenant_model
+from django.urls import reverse
 from .models import Company, Domain
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 class DomainInline(admin.TabularInline):
@@ -95,7 +100,7 @@ class CompanyAdmin(admin.ModelAdmin):
         "name",
         "schema_name",
         "get_domain_display",
-        "get_tenant_users_count", 
+        "get_tenant_users_count",
         "get_tenant_emails_count",
         "get_telegram_bots_count",
         "is_active_display",
@@ -103,13 +108,21 @@ class CompanyAdmin(admin.ModelAdmin):
     ]
     list_filter = ["is_active", "created_at"]
     search_fields = ["name", "schema_name"]
-    readonly_fields = ["created_at", "updated_at", "get_tenant_users_count", "get_tenant_emails_count", "get_telegram_bots_count"]
+    readonly_fields = ["created_at", "updated_at", "get_tenant_users_count", "get_tenant_emails_count", "get_telegram_bots_count", "manage_users_display"]
     inlines = [DomainInline]
+    actions = ['create_user_for_companies']
     
     def get_fieldsets(self, request, obj=None):
         if obj:  # Editando empresa existente
             return (
                 ("Información Básica", {"fields": ("name", "schema_name", "is_active")}),
+                (
+                    "👥 Gestión de Usuarios",
+                    {
+                        "fields": ("manage_users_display",),
+                        "description": "Gestiona los usuarios de esta empresa y sus accesos a Telegram"
+                    },
+                ),
                 (
                     "Estadísticas del Tenant",
                     {
@@ -177,6 +190,189 @@ class CompanyAdmin(admin.ModelAdmin):
             return 0
     get_telegram_bots_count.short_description = "🤖 Bots Telegram"
 
+    def manage_users_display(self, obj):
+        """Muestra interfaz para gestionar usuarios de la empresa"""
+        if obj.schema_name == 'public':
+            return mark_safe('<p style="color: gray;">No aplicable para esquema público</p>')
+
+        original_schema = connection.schema_name
+        try:
+            # Cambiar al schema de la empresa
+            connection.set_schema(obj.schema_name)
+
+            from user.models import User, Role
+
+            # Obtener todos los usuarios
+            users = User.objects.select_related('role').all()
+
+            if not users.exists():
+                html = '''
+                <div style="font-family: Arial; background: #fff3cd; padding: 20px; border-radius: 8px; border: 2px solid #ffc107;">
+                    <h3 style="color: #856404; margin-top: 0;">⚠️ No hay usuarios en esta empresa</h3>
+                    <p>Utiliza el formulario de abajo para crear el primer usuario.</p>
+                </div>
+                '''
+            else:
+                # Construir tabla de usuarios
+                rows = []
+                for user in users:
+                    # Obtener código de telegram
+                    telegram_code = self._get_telegram_code_for_user(user, obj)
+                    telegram_status = self._get_telegram_status(user, obj)
+
+                    rows.append(f'''
+                    <tr>
+                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">{user.id}</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #ddd;"><strong>{user.name}</strong></td>
+                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">{user.email}</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">{user.role.get_type_display()}</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">{telegram_status}</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">{telegram_code}</td>
+                        <td style="padding: 10px; border-bottom: 1px solid #ddd;">
+                            {'<span style="color: green;">✓ Activo</span>' if user.is_active else '<span style="color: red;">✗ Inactivo</span>'}
+                        </td>
+                    </tr>
+                    ''')
+
+                html = f'''
+                <div style="font-family: Arial;">
+                    <h3 style="color: #1976d2; margin-top: 0;">👥 Usuarios de {obj.name} ({len(users)} total)</h3>
+                    <table style="width: 100%; border-collapse: collapse; background: white; box-shadow: 0 2px 4px rgba(0,0,0,0.1);">
+                        <thead style="background: #1976d2; color: white;">
+                            <tr>
+                                <th style="padding: 12px; text-align: left;">ID</th>
+                                <th style="padding: 12px; text-align: left;">Nombre</th>
+                                <th style="padding: 12px; text-align: left;">Email</th>
+                                <th style="padding: 12px; text-align: left;">Rol</th>
+                                <th style="padding: 12px; text-align: left;">Telegram</th>
+                                <th style="padding: 12px; text-align: left;">Código Registro</th>
+                                <th style="padding: 12px; text-align: left;">Estado</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {''.join(rows)}
+                        </tbody>
+                    </table>
+                </div>
+                '''
+
+            # Agregar formulario para crear nuevo usuario
+            # Obtener roles disponibles
+            roles = Role.objects.all()
+            role_options = ''.join([f'<option value="{role.type}">{role.get_type_display()}</option>' for role in roles])
+
+            html += f'''
+            <div style="font-family: Arial; background: #e3f2fd; padding: 20px; border-radius: 8px; border: 2px solid #2196f3; margin-top: 20px;">
+                <h3 style="color: #1565c0; margin-top: 0;">➕ Crear Nuevo Usuario</h3>
+                <form method="post" style="background: white; padding: 20px; border-radius: 5px;">
+                    <input type="hidden" name="csrfmiddlewaretoken" value="{self._get_csrf_token()}">
+                    <input type="hidden" name="action" value="create_user_for_company">
+                    <input type="hidden" name="company_id" value="{obj.id}">
+
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Nombre completo:</label>
+                        <input type="text" name="user_name" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Email:</label>
+                        <input type="email" name="user_email" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Teléfono (opcional):</label>
+                        <input type="text" name="user_phone" style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: block; margin-bottom: 5px; font-weight: bold;">Rol:</label>
+                        <select name="user_role" required style="width: 100%; padding: 8px; border: 1px solid #ddd; border-radius: 4px;">
+                            {role_options}
+                        </select>
+                    </div>
+
+                    <div style="margin-bottom: 15px;">
+                        <label style="display: inline-block; margin-right: 10px;">
+                            <input type="checkbox" name="user_can_receive_alerts" checked value="1">
+                            Puede recibir alertas
+                        </label>
+                    </div>
+
+                    <button type="submit" style="background: #2196f3; color: white; padding: 10px 20px; border: none; border-radius: 4px; cursor: pointer; font-size: 14px;">
+                        ➕ Crear Usuario y Generar Código Telegram
+                    </button>
+                </form>
+            </div>
+            '''
+
+            return mark_safe(html)
+
+        except Exception as e:
+            logger.error(f"Error mostrando usuarios: {e}", exc_info=True)
+            return mark_safe(f'<p style="color: red;">Error: {str(e)}</p>')
+        finally:
+            connection.set_schema(original_schema)
+
+    manage_users_display.short_description = "Gestión de Usuarios"
+
+    def _get_csrf_token(self):
+        """Helper para obtener el CSRF token (simplificado)"""
+        from django.middleware.csrf import get_token
+        from django.http import HttpRequest
+        request = HttpRequest()
+        return get_token(request)
+
+    def _get_telegram_code_for_user(self, user, company):
+        """Obtiene el código de telegram activo para un usuario"""
+        original_schema = connection.schema_name
+        try:
+            connection.set_schema('public')
+            from telegram_bot.models import TelegramRegistrationCode
+
+            code = TelegramRegistrationCode.objects.filter(
+                company=company,
+                assigned_to_user_email=user.email,
+                is_used=False
+            ).order_by('-created_at').first()
+
+            if code and code.is_valid():
+                return f'<code style="background: #f5f5f5; padding: 3px 8px; border-radius: 3px; font-weight: bold;">{code.code}</code>'
+            elif code and code.is_expired():
+                return '<span style="color: orange;">Código expirado</span>'
+            elif code and code.is_used:
+                return '<span style="color: gray;">Código usado</span>'
+            else:
+                return '<span style="color: gray;">Sin código</span>'
+        except Exception as e:
+            return f'<span style="color: red;">Error</span>'
+        finally:
+            connection.set_schema(original_schema)
+
+    def _get_telegram_status(self, user, company):
+        """Obtiene el estado de telegram del usuario"""
+        original_schema = connection.schema_name
+        try:
+            connection.set_schema('public')
+            from telegram_bot.models import TelegramChat, TelegramRegistrationCode
+
+            # Buscar si tiene chat vinculado
+            code = TelegramRegistrationCode.objects.filter(
+                company=company,
+                assigned_to_user_email=user.email,
+                is_used=True
+            ).first()
+
+            if code and code.used_by_chat:
+                return f'<span style="color: green;">✓ Vinculado</span>'
+            elif user.telegram_chat_id:
+                return f'<span style="color: green;">✓ Manual</span>'
+            else:
+                return '<span style="color: gray;">✗ No vinculado</span>'
+        except:
+            return '<span style="color: gray;">-</span>'
+        finally:
+            connection.set_schema(original_schema)
+
     def is_active_display(self, obj):
         """Muestra el estado activo con colores"""
         if obj.is_active:
@@ -195,9 +391,326 @@ class CompanyAdmin(admin.ModelAdmin):
     get_domain_display.short_description = "Dominio Principal"
     get_domain_display.allow_tags = True
 
+    def changeform_view(self, request, object_id=None, form_url='', extra_context=None):
+        """Override para manejar el POST de creación de usuarios"""
+        if request.method == 'POST' and request.POST.get('action') == 'create_user_for_company':
+            return self._handle_create_user(request, object_id)
+
+        return super().changeform_view(request, object_id, form_url, extra_context)
+
+    def _handle_create_user(self, request, company_id):
+        """Maneja la creación de un nuevo usuario para la empresa"""
+        from django.http import HttpResponseRedirect
+        from django.urls import reverse
+
+        original_schema = connection.schema_name
+
+        try:
+            # Obtener la empresa
+            company = Company.objects.get(id=company_id)
+
+            # Obtener datos del formulario
+            user_name = request.POST.get('user_name')
+            user_email = request.POST.get('user_email')
+            user_phone = request.POST.get('user_phone', '')
+            user_role_type = request.POST.get('user_role')
+            user_can_receive_alerts = request.POST.get('user_can_receive_alerts') == '1'
+
+            # Validar datos
+            if not user_name or not user_email or not user_role_type:
+                self.message_user(
+                    request,
+                    "❌ Error: Nombre, email y rol son obligatorios",
+                    level='error'
+                )
+                return HttpResponseRedirect(reverse('admin:company_company_change', args=[company_id]))
+
+            # Cambiar al schema de la empresa
+            connection.set_schema(company.schema_name)
+
+            from user.models import User, Role
+
+            # Verificar si el email ya existe
+            if User.objects.filter(email=user_email).exists():
+                self.message_user(
+                    request,
+                    f"❌ Error: Ya existe un usuario con el email {user_email}",
+                    level='error'
+                )
+                connection.set_schema(original_schema)
+                return HttpResponseRedirect(reverse('admin:company_company_change', args=[company_id]))
+
+            # Obtener el rol
+            try:
+                role = Role.objects.get(type=user_role_type)
+            except Role.DoesNotExist:
+                self.message_user(
+                    request,
+                    f"❌ Error: El rol '{user_role_type}' no existe",
+                    level='error'
+                )
+                connection.set_schema(original_schema)
+                return HttpResponseRedirect(reverse('admin:company_company_change', args=[company_id]))
+
+            # Crear el usuario
+            user = User.objects.create(
+                name=user_name,
+                email=user_email,
+                phone_number=user_phone,
+                role=role,
+                company=company,
+                is_active=True,
+                can_receive_alerts=user_can_receive_alerts
+            )
+
+            # Volver al schema público
+            connection.set_schema('public')
+
+            # Crear código de registro de Telegram si puede recibir alertas
+            telegram_code = None
+            if user_can_receive_alerts:
+                from telegram_bot.models import TelegramRegistrationCode
+
+                telegram_code = TelegramRegistrationCode.objects.create(
+                    company=company,
+                    created_by=request.user,
+                    assigned_to_user_email=user.email,
+                    assigned_to_user_name=user.name,
+                    notes=f"Código generado automáticamente para {user.name} ({user.email})"
+                )
+
+            # Mensaje de éxito
+            if telegram_code:
+                self.message_user(
+                    request,
+                    format_html(
+                        '✅ Usuario <strong>{}</strong> creado exitosamente!<br/>'
+                        '🎫 Código de registro de Telegram: <strong>{}</strong><br/>'
+                        '📧 Email: {}',
+                        user_name,
+                        telegram_code.code,
+                        user_email
+                    ),
+                    level='success'
+                )
+            else:
+                self.message_user(
+                    request,
+                    format_html(
+                        '✅ Usuario <strong>{}</strong> creado exitosamente!<br/>'
+                        '📧 Email: {}',
+                        user_name,
+                        user_email
+                    ),
+                    level='success'
+                )
+
+        except Exception as e:
+            logger.error(f"Error creando usuario: {e}", exc_info=True)
+            self.message_user(
+                request,
+                f"❌ Error creando usuario: {str(e)}",
+                level='error'
+            )
+        finally:
+            # Asegurar que volvemos al schema público
+            connection.set_schema(original_schema)
+
+        # Redirigir de vuelta a la página de la empresa
+        return HttpResponseRedirect(reverse('admin:company_company_change', args=[company_id]))
+
     def has_module_permission(self, request):
         """Solo mostrar en esquema público (superadmin)"""
         return connection.schema_name == "public"
+
+    def get_deleted_objects(self, objs, request):
+        """
+        Override para evitar que Django intente hacer queries cross-schema
+        al verificar objetos relacionados antes de eliminar
+        """
+        from django.utils.encoding import force_str
+        from django.utils.html import format_html
+
+        # Construir la lista de objetos manualmente sin usar collector
+        # para evitar queries cross-schema
+        perms_needed = set()
+        protected = []
+        to_delete = []
+        model_count = {}
+
+        def format_callback(obj):
+            return force_str(obj)
+
+        for obj in objs:
+            opts = obj._meta
+            verbose_name = opts.verbose_name
+
+            # Información básica de la empresa
+            info_items = [f"Empresa: {obj.name}", f"Schema: {obj.schema_name}"]
+
+            # Contar objetos dentro del tenant si es posible
+            if obj.schema_name != 'public':
+                try:
+                    with tenant_context(obj):
+                        from user.models import User
+                        from emails.models import ReceivedEmail
+                        from imap_handler.models import IMAPConfiguration
+
+                        user_count = User.objects.count()
+                        email_count = ReceivedEmail.objects.count()
+                        imap_count = IMAPConfiguration.objects.count()
+
+                        if user_count > 0:
+                            model_count["Usuarios"] = user_count
+                            info_items.append(f"- {user_count} usuarios")
+
+                        if email_count > 0:
+                            model_count["Emails"] = email_count
+                            info_items.append(f"- {email_count} emails")
+
+                        if imap_count > 0:
+                            model_count["Configuraciones IMAP"] = imap_count
+                            info_items.append(f"- {imap_count} configuraciones IMAP")
+
+                except Exception as e:
+                    logger.error(f"Error contando objetos del tenant: {e}")
+
+                # Contar objetos en schema público relacionados
+                try:
+                    from telegram_bot.models import TelegramChat, TelegramMessage, TelegramRegistrationCode
+
+                    chat_count = TelegramChat.objects.filter(company=obj).count()
+                    msg_count = TelegramMessage.objects.filter(company=obj).count()
+                    code_count = TelegramRegistrationCode.objects.filter(company=obj).count()
+
+                    if chat_count > 0:
+                        model_count["Chats de Telegram"] = chat_count
+                        info_items.append(f"- {chat_count} chats de Telegram")
+
+                    if msg_count > 0:
+                        model_count["Mensajes de Telegram"] = msg_count
+                        info_items.append(f"- {msg_count} mensajes de Telegram")
+
+                    if code_count > 0:
+                        model_count["Códigos de registro"] = code_count
+                        info_items.append(f"- {code_count} códigos de registro")
+
+                except Exception as e:
+                    logger.error(f"Error contando objetos de Telegram: {e}")
+
+            # Agregar a la lista
+            to_delete.append([
+                format_callback(obj),
+                info_items
+            ])
+
+        return to_delete, model_count, perms_needed, protected
+
+    def delete_model(self, request, obj):
+        """
+        Override para eliminar correctamente una empresa con su tenant
+        """
+        if obj.schema_name == 'public':
+            self.message_user(
+                request,
+                "No se puede eliminar el esquema público",
+                level='error'
+            )
+            return
+
+        try:
+            user_count = 0
+            email_count = 0
+            imap_count = 0
+            telegram_chats_count = 0
+            telegram_messages_count = 0
+            telegram_codes_count = 0
+
+            # Guardar información antes de eliminar
+            schema_name = obj.schema_name
+            company_name = obj.name
+            company_id = obj.id
+
+            # Paso 1: Contar objetos del tenant (si existe)
+            original_schema = connection.schema_name
+            try:
+                connection.set_schema(schema_name)
+
+                from user.models import User
+                from emails.models import ReceivedEmail
+                from imap_handler.models import IMAPConfiguration
+
+                try:
+                    user_count = User.objects.count()
+                    email_count = ReceivedEmail.objects.count()
+                    imap_count = IMAPConfiguration.objects.count()
+                except Exception as count_error:
+                    # El schema puede no existir si hubo un error anterior
+                    logger.warning(f"No se pudieron contar objetos del schema {schema_name}: {count_error}")
+                    user_count = 0
+                    email_count = 0
+                    imap_count = 0
+            finally:
+                connection.set_schema(original_schema)
+
+            # Paso 2: Volver al schema público
+            connection.set_schema('public')
+
+            # Contar objetos en schema público
+            from telegram_bot.models import TelegramChat, TelegramMessage, TelegramRegistrationCode
+
+            telegram_chats_count = TelegramChat.objects.filter(company=obj).count()
+            telegram_messages_count = TelegramMessage.objects.filter(company=obj).count()
+            telegram_codes_count = TelegramRegistrationCode.objects.filter(company=obj).count()
+
+            # Eliminar objetos de Telegram
+            TelegramChat.objects.filter(company=obj).delete()
+            TelegramMessage.objects.filter(company=obj).delete()
+            TelegramRegistrationCode.objects.filter(company=obj).delete()
+
+            # Eliminar dominios asociados
+            Domain.objects.filter(tenant=obj).delete()
+
+            # Paso 3: Eliminar el schema PostgreSQL directamente usando SQL
+            from django.db import connection as db_connection
+            with db_connection.cursor() as cursor:
+                # Eliminar el schema y todo su contenido
+                cursor.execute(f'DROP SCHEMA IF EXISTS "{schema_name}" CASCADE')
+                logger.info(f"Schema {schema_name} eliminado con DROP SCHEMA CASCADE")
+
+            # Paso 4: Eliminar el registro de la empresa usando SQL directo
+            # para evitar que Django intente verificar relaciones
+            with db_connection.cursor() as cursor:
+                cursor.execute(
+                    'DELETE FROM company_company WHERE id = %s',
+                    [company_id]
+                )
+                logger.info(f"Registro de empresa {company_id} eliminado")
+
+            self.message_user(
+                request,
+                f'Empresa "{company_name}" eliminada exitosamente. '
+                f'Se eliminaron: {user_count} usuarios, {email_count} emails, '
+                f'{imap_count} configuraciones IMAP, '
+                f'{telegram_chats_count} chats de Telegram, {telegram_messages_count} mensajes de Telegram, '
+                f'{telegram_codes_count} códigos de registro.',
+                level='success'
+            )
+        except Exception as e:
+            logger.error(f"Error eliminando empresa: {str(e)}", exc_info=True)
+
+            self.message_user(
+                request,
+                f'Error eliminando empresa: {str(e)}',
+                level='error'
+            )
+
+    def delete_queryset(self, request, queryset):
+        """
+        Override para eliminar múltiples empresas
+        """
+        for obj in queryset:
+            self.delete_model(request, obj)
 
     def save_model(self, request, obj, form, change):
         """Guarda la empresa y crea el setup completo si es nueva"""

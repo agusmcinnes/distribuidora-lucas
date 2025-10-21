@@ -7,7 +7,7 @@ import logging
 import requests
 from django.utils import timezone
 from django.db import connection
-from .models import TelegramConfig, TelegramChat, TelegramMessage
+from .models import TelegramConfig, TelegramChat, TelegramMessage, TelegramRegistrationCode
 
 logger = logging.getLogger(__name__)
 
@@ -80,7 +80,13 @@ class TelegramNotificationService:
             logger.warning("No se especificó empresa para enviar alerta")
             return False
 
+        # Guardar el esquema original
+        original_schema = connection.schema_name
+
         try:
+            # Cambiar al esquema público para acceder a TelegramChat
+            connection.set_schema("public")
+
             # Obtener chats activos de la empresa
             chats = TelegramChat.objects.filter(
                 company=target_company, is_active=True, email_alerts=True
@@ -90,14 +96,21 @@ class TelegramNotificationService:
                 logger.warning(
                     f"No hay chats activos para la empresa {target_company.name}"
                 )
+                connection.set_schema(original_schema)
                 return False
 
             # Crear mensaje
             message_text = self._format_email_message(email)
 
+            # Debug: Log del número de chats antes del loop
+            chats_list = list(chats)  # Convertir a lista para evitar múltiples queries
+            logger.info(f"🔍 DEBUG: Se encontraron {len(chats_list)} chats para {target_company.name}")
+            logger.info(f"🔍 DEBUG: Chat IDs: {[chat.chat_id for chat in chats_list]}")
+
             # Enviar a todos los chats
             success_count = 0
-            for chat in chats:
+            for idx, chat in enumerate(chats_list):
+                logger.info(f"🔍 DEBUG: Iteración {idx+1}/{len(chats_list)} - Enviando a chat {chat.chat_id} ({chat.name})")
                 if self._send_message_to_chat(
                     chat=chat,
                     message_text=message_text,
@@ -108,22 +121,33 @@ class TelegramNotificationService:
                     email_priority=email.priority,
                 ):
                     success_count += 1
+                    logger.info(f"✅ DEBUG: Mensaje enviado exitosamente a {chat.chat_id}")
+                else:
+                    logger.error(f"❌ DEBUG: Fallo al enviar mensaje a {chat.chat_id}")
 
             logger.info(
-                f"Alerta de email enviada a {success_count}/{chats.count()} chats de {target_company.name}"
+                f"Alerta de email enviada a {success_count}/{len(chats_list)} chats de {target_company.name}"
             )
 
             # Marcar email como enviado si se envió a al menos un chat
             if success_count > 0:
+                # Cambiar al schema del tenant para actualizar el email
+                connection.set_schema(original_schema)
                 email.mark_as_sent()
                 return True
 
+            connection.set_schema(original_schema)
             return False
 
         except Exception as e:
             logger.error(f"Error enviando alerta de email: {e}", exc_info=True)
+            connection.set_schema(original_schema)
             email.mark_as_failed(f"Error: {str(e)}")
             return False
+        finally:
+            # Asegurar que siempre se restaure el esquema original
+            if connection.schema_name != original_schema:
+                connection.set_schema(original_schema)
 
     def send_system_alert(self, message, subject="Alerta del Sistema", company=None):
         """
@@ -143,7 +167,13 @@ class TelegramNotificationService:
             logger.warning("No se especificó empresa para enviar alerta del sistema")
             return False
 
+        # Guardar el esquema original
+        original_schema = connection.schema_name
+
         try:
+            # Cambiar al esquema público para acceder a TelegramChat
+            connection.set_schema("public")
+
             # Obtener chats activos que reciben alertas del sistema
             chats = TelegramChat.objects.filter(
                 company=target_company, is_active=True, system_alerts=True
@@ -153,6 +183,7 @@ class TelegramNotificationService:
                 logger.warning(
                     f"No hay chats para alertas del sistema en {target_company.name}"
                 )
+                connection.set_schema(original_schema)
                 return False
 
             # Enviar a todos los chats
@@ -170,11 +201,17 @@ class TelegramNotificationService:
                 f"Alerta del sistema enviada a {success_count}/{chats.count()} chats de {target_company.name}"
             )
 
+            connection.set_schema(original_schema)
             return success_count > 0
 
         except Exception as e:
             logger.error(f"Error enviando alerta del sistema: {e}", exc_info=True)
+            connection.set_schema(original_schema)
             return False
+        finally:
+            # Asegurar que siempre se restaure el esquema original
+            if connection.schema_name != original_schema:
+                connection.set_schema(original_schema)
 
     def _send_message_to_chat(
         self,
@@ -408,3 +445,187 @@ class TelegramService:
         except Exception as e:
             logger.error(f"Error enviando alerta de email: {e}")
             return False
+
+
+class TelegramRegistrationService:
+    """
+    Servicio para gestionar el registro de chats usando códigos
+    """
+
+    @staticmethod
+    def register_chat_with_code(code_str, chat_data):
+        """
+        Valida un código de registro y crea automáticamente el chat
+
+        Args:
+            code_str: Código de registro (string)
+            chat_data: Diccionario con datos del chat de Telegram:
+                - chat_id: ID del chat
+                - chat_type: Tipo de chat (private, group, supergroup, channel)
+                - username: Username del chat (opcional)
+                - title: Título del grupo/canal (opcional)
+
+        Returns:
+            dict: Resultado con estructura:
+                {
+                    'success': bool,
+                    'message': str,
+                    'chat': TelegramChat (si success=True),
+                    'error_code': str (si success=False)
+                }
+        """
+        try:
+            # Normalizar código (mayúsculas, sin espacios)
+            code_str = code_str.strip().upper()
+
+            # Buscar código
+            try:
+                registration_code = TelegramRegistrationCode.objects.select_related(
+                    'company', 'used_by_chat'
+                ).get(code=code_str)
+            except TelegramRegistrationCode.DoesNotExist:
+                return {
+                    'success': False,
+                    'message': f'❌ Código inválido: {code_str}',
+                    'error_code': 'CODE_NOT_FOUND'
+                }
+
+            # Validar que el código no esté usado
+            if registration_code.is_used:
+                msg = f'❌ Este código ya fue usado'
+                if registration_code.used_by_chat:
+                    msg += f' por el chat "{registration_code.used_by_chat.name}"'
+                return {
+                    'success': False,
+                    'message': msg,
+                    'error_code': 'CODE_ALREADY_USED'
+                }
+
+            # Validar que el código no esté expirado
+            if registration_code.is_expired():
+                return {
+                    'success': False,
+                    'message': f'❌ Este código expiró el {registration_code.expires_at.strftime("%d/%m/%Y %H:%M")}',
+                    'error_code': 'CODE_EXPIRED'
+                }
+
+            # Verificar que el chat no esté ya registrado
+            chat_id = chat_data.get('chat_id')
+
+            # Verificar si el chat ya existe para ESTA empresa
+            existing_chat_same_company = TelegramChat.objects.filter(
+                chat_id=chat_id,
+                company=registration_code.company
+            ).first()
+
+            if existing_chat_same_company:
+                return {
+                    'success': False,
+                    'message': f'❌ Este chat ya está registrado como "{existing_chat_same_company.name}" para tu empresa.\n\n💡 Si quieres actualizar la configuración, elimina el chat antiguo desde el admin primero.',
+                    'error_code': 'CHAT_ALREADY_REGISTERED_SAME_COMPANY'
+                }
+
+            # Verificar si el chat ya existe para OTRA empresa
+            existing_chat_other_company = TelegramChat.objects.filter(chat_id=chat_id).first()
+            if existing_chat_other_company:
+                return {
+                    'success': False,
+                    'message': f'❌ Este chat ya está registrado para la empresa "{existing_chat_other_company.company.name}".\n\nUn chat no puede estar registrado en múltiples empresas.',
+                    'error_code': 'CHAT_ALREADY_REGISTERED_OTHER_COMPANY'
+                }
+
+            # Obtener el bot activo
+            original_schema = connection.schema_name
+            try:
+                connection.set_schema("public")
+                active_bot = TelegramConfig.objects.filter(is_active=True).first()
+            finally:
+                connection.set_schema(original_schema)
+
+            if not active_bot:
+                return {
+                    'success': False,
+                    'message': '❌ Error: No hay bot activo configurado',
+                    'error_code': 'NO_ACTIVE_BOT'
+                }
+
+            # Crear el chat automáticamente
+            chat_type = chat_data.get('chat_type', 'private')
+            username = chat_data.get('username', '')
+            title = chat_data.get('title', '')
+
+            # Generar nombre descriptivo para el chat
+            if title:
+                chat_name = title
+            elif username:
+                chat_name = f"@{username}"
+            else:
+                chat_name = f"Chat {chat_id}"
+
+            new_chat = TelegramChat.objects.create(
+                company=registration_code.company,
+                bot=active_bot,
+                name=chat_name,
+                chat_id=chat_id,
+                chat_type=chat_type,
+                username=username,
+                title=title,
+                alert_level='all',
+                email_alerts=True,
+                system_alerts=False,
+                is_active=True,
+            )
+
+            # Marcar código como usado
+            registration_code.mark_as_used(new_chat)
+
+            # Si el código está asignado a un usuario específico, actualizar su telegram_chat_id
+            if registration_code.assigned_to_user_email:
+                try:
+                    # Cambiar al schema del tenant para actualizar el usuario
+                    tenant_schema = registration_code.company.schema_name
+                    connection.set_schema(tenant_schema)
+
+                    from user.models import User
+                    user = User.objects.filter(
+                        email=registration_code.assigned_to_user_email,
+                        company=registration_code.company
+                    ).first()
+
+                    if user:
+                        user.telegram_chat_id = str(chat_id)
+                        user.save()
+                        logger.info(
+                            f'Usuario {user.email} actualizado con telegram_chat_id: {chat_id}'
+                        )
+                    else:
+                        logger.warning(
+                            f'No se encontró usuario con email {registration_code.assigned_to_user_email} '
+                            f'en empresa {registration_code.company.name}'
+                        )
+
+                    # Volver al schema público
+                    connection.set_schema('public')
+                except Exception as e:
+                    logger.error(f'Error actualizando usuario con telegram_chat_id: {e}')
+                    # Volver al schema público en caso de error
+                    connection.set_schema('public')
+
+            logger.info(
+                f'Chat {chat_id} registrado exitosamente para empresa {registration_code.company.name} '
+                f'usando código {code_str}'
+            )
+
+            return {
+                'success': True,
+                'message': f'✅ ¡Registro exitoso!\n\nTu chat "{chat_name}" ha sido registrado para la empresa {registration_code.company.name}.\n\nYa comenzarás a recibir notificaciones de nuevos emails.',
+                'chat': new_chat,
+            }
+
+        except Exception as e:
+            logger.error(f'Error registrando chat con código {code_str}: {e}', exc_info=True)
+            return {
+                'success': False,
+                'message': f'❌ Error interno del servidor: {str(e)}',
+                'error_code': 'INTERNAL_ERROR'
+            }
