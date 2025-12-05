@@ -10,29 +10,34 @@ logger = logging.getLogger(__name__)
 
 
 @shared_task(bind=True, max_retries=3)
-def send_email_alert_task(self, email_id):
+def send_alert_task(self, alert_type, alert_data):
     """
-    Tarea para enviar alerta de email de forma asíncrona
+    Tarea genérica para enviar alertas de forma asíncrona
+
+    Args:
+        alert_type: Tipo de alerta (powerbi, system, etc.)
+        alert_data: Diccionario con los datos de la alerta
     """
     try:
-        from emails.models import ReceivedEmail
-
-        # Obtener el email
-        email = ReceivedEmail.objects.get(id=email_id)
-
-        # Enviar alerta
         service = TelegramNotificationService()
-        success = service.send_email_alert(email)
+
+        if alert_type == "powerbi":
+            success = service.send_powerbi_alert(alert_data)
+        else:
+            success = service.send_system_alert(
+                alert_data.get("subject", "Alerta del sistema"),
+                alert_data.get("message", "")
+            )
 
         if success:
-            logger.info(f"Alerta enviada exitosamente para email {email_id}")
+            logger.info(f"Alerta {alert_type} enviada exitosamente")
         else:
-            logger.error(f"Error enviando alerta para email {email_id}")
+            logger.error(f"Error enviando alerta {alert_type}")
 
         return success
 
     except Exception as e:
-        logger.error(f"Error en tarea de alerta de email {email_id}: {e}")
+        logger.error(f"Error en tarea de alerta {alert_type}: {e}")
 
         # Reintentar en caso de error
         if self.request.retries < self.max_retries:

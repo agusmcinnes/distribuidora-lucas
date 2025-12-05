@@ -63,12 +63,16 @@ class TelegramNotificationService:
             # Restaurar el esquema original
             connection.set_schema(original_schema)
 
-    def send_email_alert(self, email, company=None):
+    def send_powerbi_alert(self, alert_data, company=None):
         """
-        Enviar alerta por nuevo email a los chats de la empresa
+        Enviar alerta de Power BI a los chats de la empresa
 
         Args:
-            email: Instancia de ReceivedEmail
+            alert_data: Diccionario con datos de la alerta:
+                - subject: Asunto de la alerta
+                - body: Cuerpo del mensaje
+                - priority: Prioridad (low, medium, high, critical)
+                - record_id: ID del registro en Power BI
             company: Instancia de Company (opcional, usa self.company por defecto)
 
         Returns:
@@ -77,7 +81,7 @@ class TelegramNotificationService:
         target_company = company or self.company
 
         if not target_company:
-            logger.warning("No se especificó empresa para enviar alerta")
+            logger.warning("No se especificó empresa para enviar alerta de Power BI")
             return False
 
         # Guardar el esquema original
@@ -87,7 +91,7 @@ class TelegramNotificationService:
             # Cambiar al esquema público para acceder a TelegramChat
             connection.set_schema("public")
 
-            # Obtener chats activos de la empresa
+            # Obtener chats activos de la empresa que reciben alertas
             chats = TelegramChat.objects.filter(
                 company=target_company, is_active=True, email_alerts=True
             )
@@ -100,49 +104,32 @@ class TelegramNotificationService:
                 return False
 
             # Crear mensaje
-            message_text = self._format_email_message(email)
-
-            # Debug: Log del número de chats antes del loop
-            chats_list = list(chats)  # Convertir a lista para evitar múltiples queries
-            logger.info(f"🔍 DEBUG: Se encontraron {len(chats_list)} chats para {target_company.name}")
-            logger.info(f"🔍 DEBUG: Chat IDs: {[chat.chat_id for chat in chats_list]}")
+            message_text = self._format_powerbi_message(alert_data)
 
             # Enviar a todos los chats
+            chats_list = list(chats)
+            logger.info(f"Enviando alerta Power BI a {len(chats_list)} chats de {target_company.name}")
+
             success_count = 0
-            for idx, chat in enumerate(chats_list):
-                logger.info(f"🔍 DEBUG: Iteración {idx+1}/{len(chats_list)} - Enviando a chat {chat.chat_id} ({chat.name})")
+            for chat in chats_list:
                 if self._send_message_to_chat(
                     chat=chat,
                     message_text=message_text,
-                    subject=f"Email de {email.sender}",
-                    message_type="email_alert",
-                    email_subject=email.subject,
-                    email_sender=email.sender,
-                    email_priority=email.priority,
+                    subject=alert_data.get("subject", "Alerta Power BI"),
+                    message_type="powerbi_alert",
                 ):
                     success_count += 1
-                    logger.info(f"✅ DEBUG: Mensaje enviado exitosamente a {chat.chat_id}")
-                else:
-                    logger.error(f"❌ DEBUG: Fallo al enviar mensaje a {chat.chat_id}")
 
             logger.info(
-                f"Alerta de email enviada a {success_count}/{len(chats_list)} chats de {target_company.name}"
+                f"Alerta Power BI enviada a {success_count}/{len(chats_list)} chats de {target_company.name}"
             )
 
-            # Marcar email como enviado si se envió a al menos un chat
-            if success_count > 0:
-                # Cambiar al schema del tenant para actualizar el email
-                connection.set_schema(original_schema)
-                email.mark_as_sent()
-                return True
-
             connection.set_schema(original_schema)
-            return False
+            return success_count > 0
 
         except Exception as e:
-            logger.error(f"Error enviando alerta de email: {e}", exc_info=True)
+            logger.error(f"Error enviando alerta de Power BI: {e}", exc_info=True)
             connection.set_schema(original_schema)
-            email.mark_as_failed(f"Error: {str(e)}")
             return False
         finally:
             # Asegurar que siempre se restaure el esquema original
@@ -219,9 +206,6 @@ class TelegramNotificationService:
         message_text,
         subject,
         message_type="manual",
-        email_subject=None,
-        email_sender=None,
-        email_priority=None,
     ):
         """
         Envía un mensaje a un chat específico y registra el envío
@@ -230,10 +214,7 @@ class TelegramNotificationService:
             chat: Instancia de TelegramChat
             message_text: Texto del mensaje a enviar
             subject: Asunto del mensaje
-            message_type: Tipo de mensaje (email_alert, system_alert, manual)
-            email_subject: Asunto del email original (opcional)
-            email_sender: Remitente del email original (opcional)
-            email_priority: Prioridad del email original (opcional)
+            message_type: Tipo de mensaje (powerbi_alert, system_alert, manual)
 
         Returns:
             bool: True si el mensaje se envió exitosamente
@@ -246,9 +227,6 @@ class TelegramNotificationService:
             subject=subject,
             message=message_text,
             status="pending",
-            email_subject=email_subject,
-            email_sender=email_sender,
-            email_priority=email_priority,
         )
 
         try:
@@ -284,13 +262,14 @@ class TelegramNotificationService:
             logger.error(f"Error enviando mensaje a chat {chat.chat_id}: {e}")
             return False
 
-    def _format_email_message(self, email):
-        """Formatear mensaje de email para Telegram"""
+    def _format_powerbi_message(self, alert_data):
+        """Formatear mensaje de Power BI para Telegram"""
         import html
 
         # Escapar HTML para evitar errores de parsing
-        sender = html.escape(email.sender) if email.sender else "Desconocido"
-        subject = html.escape(email.subject) if email.subject else "Sin asunto"
+        subject = html.escape(alert_data.get("subject", "Sin asunto"))
+        body = html.escape(alert_data.get("body", ""))
+        priority = alert_data.get("priority", "medium")
 
         # Determinar emoji por prioridad
         priority_emojis = {
@@ -299,23 +278,24 @@ class TelegramNotificationService:
             "medium": "🟡",
             "low": "🟢",
         }
-        emoji = priority_emojis.get(email.priority, "📧")
+        emoji = priority_emojis.get(priority, "📊")
 
         # Determinar texto de prioridad
-        priority_text = email.get_priority_display().upper()
+        priority_labels = {
+            "critical": "CRÍTICA",
+            "high": "ALTA",
+            "medium": "MEDIA",
+            "low": "BAJA",
+        }
+        priority_text = priority_labels.get(priority, "MEDIA")
 
-        message = f"{emoji} <b>Nuevo Email - Prioridad {priority_text}</b>\n\n"
-        message += f"<b>De:</b> {sender}\n"
+        message = f"{emoji} <b>Alerta Power BI - Prioridad {priority_text}</b>\n\n"
         message += f"<b>Asunto:</b> {subject}\n"
-        message += f"<b>Fecha:</b> {email.received_date.strftime('%H:%M:%S %d/%m/%Y')}\n"
 
-        # Preview del cuerpo (máximo 200 caracteres)
-        if email.body:
-            body_preview = html.escape(email.body)
-            preview = (
-                body_preview[:200] + "..." if len(body_preview) > 200 else body_preview
-            )
-            message += f"\n<b>Vista previa:</b>\n<i>{preview}</i>"
+        if body:
+            # Limitar cuerpo a 500 caracteres
+            body_preview = body[:500] + "..." if len(body) > 500 else body
+            message += f"\n<b>Detalle:</b>\n<i>{body_preview}</i>"
 
         # Agregar info de la empresa
         if self.company:
@@ -426,12 +406,12 @@ class TelegramService:
             logger.error(f"Error en TelegramService.send_message: {e}")
             return {"status": "error", "message": str(e)}
 
-    def send_email_alert(self, email):
+    def send_powerbi_alert(self, alert_data):
         """
-        Enviar alerta por nuevo email usando el servicio principal
+        Enviar alerta de Power BI usando el servicio principal
 
         Args:
-            email: Instancia de ReceivedEmail
+            alert_data: Diccionario con datos de la alerta
 
         Returns:
             bool: True si el mensaje se envió exitosamente
@@ -440,10 +420,10 @@ class TelegramService:
             if not self.notification_service:
                 return False
 
-            return self.notification_service.send_email_alert(email)
+            return self.notification_service.send_powerbi_alert(alert_data)
 
         except Exception as e:
-            logger.error(f"Error enviando alerta de email: {e}")
+            logger.error(f"Error enviando alerta de Power BI: {e}")
             return False
 
 
@@ -618,7 +598,7 @@ class TelegramRegistrationService:
 
             return {
                 'success': True,
-                'message': f'✅ ¡Registro exitoso!\n\nTu chat "{chat_name}" ha sido registrado para la empresa {registration_code.company.name}.\n\nYa comenzarás a recibir notificaciones de nuevos emails.',
+                'message': f'✅ ¡Registro exitoso!\n\nTu chat "{chat_name}" ha sido registrado para la empresa {registration_code.company.name}.\n\nYa comenzarás a recibir notificaciones.',
                 'chat': new_chat,
             }
 

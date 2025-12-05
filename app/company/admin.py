@@ -101,14 +101,13 @@ class CompanyAdmin(admin.ModelAdmin):
         "schema_name",
         "get_domain_display",
         "get_tenant_users_count",
-        "get_tenant_emails_count",
         "get_telegram_bots_count",
         "is_active_display",
         "created_at",
     ]
     list_filter = ["is_active", "created_at"]
     search_fields = ["name", "schema_name"]
-    readonly_fields = ["created_at", "updated_at", "get_tenant_users_count", "get_tenant_emails_count", "get_telegram_bots_count", "manage_users_display"]
+    readonly_fields = ["created_at", "updated_at", "get_tenant_users_count", "get_telegram_bots_count", "manage_users_display"]
     inlines = [DomainInline]
     actions = ['create_user_for_companies']
     
@@ -126,7 +125,7 @@ class CompanyAdmin(admin.ModelAdmin):
                 (
                     "Estadísticas del Tenant",
                     {
-                        "fields": ("get_tenant_users_count", "get_tenant_emails_count", "get_telegram_bots_count"),
+                        "fields": ("get_tenant_users_count", "get_telegram_bots_count"),
                         "classes": ("collapse",),
                     },
                 ),
@@ -165,19 +164,7 @@ class CompanyAdmin(admin.ModelAdmin):
         except:
             return 0
     get_tenant_users_count.short_description = "👥 Usuarios"
-    
-    def get_tenant_emails_count(self, obj):
-        """Obtener cantidad de emails por tenant"""
-        if obj.schema_name == 'public':
-            return "N/A (Esquema público)"
-        try:
-            with tenant_context(obj):
-                from emails.models import ReceivedEmail
-                return ReceivedEmail.objects.count()
-        except:
-            return 0
-    get_tenant_emails_count.short_description = "📧 Emails"
-    
+
     def get_telegram_bots_count(self, obj):
         """Obtener cantidad de bots de Telegram por tenant"""
         if obj.schema_name == 'public':
@@ -553,24 +540,12 @@ class CompanyAdmin(admin.ModelAdmin):
                 try:
                     with tenant_context(obj):
                         from user.models import User
-                        from emails.models import ReceivedEmail
-                        from imap_handler.models import IMAPConfiguration
 
                         user_count = User.objects.count()
-                        email_count = ReceivedEmail.objects.count()
-                        imap_count = IMAPConfiguration.objects.count()
 
                         if user_count > 0:
                             model_count["Usuarios"] = user_count
                             info_items.append(f"- {user_count} usuarios")
-
-                        if email_count > 0:
-                            model_count["Emails"] = email_count
-                            info_items.append(f"- {email_count} emails")
-
-                        if imap_count > 0:
-                            model_count["Configuraciones IMAP"] = imap_count
-                            info_items.append(f"- {imap_count} configuraciones IMAP")
 
                 except Exception as e:
                     logger.error(f"Error contando objetos del tenant: {e}")
@@ -620,8 +595,6 @@ class CompanyAdmin(admin.ModelAdmin):
 
         try:
             user_count = 0
-            email_count = 0
-            imap_count = 0
             telegram_chats_count = 0
             telegram_messages_count = 0
             telegram_codes_count = 0
@@ -637,19 +610,13 @@ class CompanyAdmin(admin.ModelAdmin):
                 connection.set_schema(schema_name)
 
                 from user.models import User
-                from emails.models import ReceivedEmail
-                from imap_handler.models import IMAPConfiguration
 
                 try:
                     user_count = User.objects.count()
-                    email_count = ReceivedEmail.objects.count()
-                    imap_count = IMAPConfiguration.objects.count()
                 except Exception as count_error:
                     # El schema puede no existir si hubo un error anterior
                     logger.warning(f"No se pudieron contar objetos del schema {schema_name}: {count_error}")
                     user_count = 0
-                    email_count = 0
-                    imap_count = 0
             finally:
                 connection.set_schema(original_schema)
 
@@ -690,8 +657,7 @@ class CompanyAdmin(admin.ModelAdmin):
             self.message_user(
                 request,
                 f'Empresa "{company_name}" eliminada exitosamente. '
-                f'Se eliminaron: {user_count} usuarios, {email_count} emails, '
-                f'{imap_count} configuraciones IMAP, '
+                f'Se eliminaron: {user_count} usuarios, '
                 f'{telegram_chats_count} chats de Telegram, {telegram_messages_count} mensajes de Telegram, '
                 f'{telegram_codes_count} códigos de registro.',
                 level='success'
