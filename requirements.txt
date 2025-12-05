@@ -1,4 +1,4 @@
-Django==5.2.5
+Django==4.2.11
 python-decouple==3.8
 python-dotenv==1.1.1
 python-dateutil==2.9.0.post0
@@ -11,3 +11,5 @@ celery==5.4.0
 redis==5.2.1
 requests==2.31.0
 psycopg2-binary==2.9.7
+django-tenants==3.6.1
+msal>=1.24.0

@@ -35,21 +35,40 @@ ALLOWED_HOSTS = []
 
 # Application definition
 
-INSTALLED_APPS = [
+# Apps compartidas (esquema público)
+SHARED_APPS = [
+    "django_tenants",  # Debe ir PRIMERO
     "django.contrib.admin",
     "django.contrib.auth",
     "django.contrib.contenttypes",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
-    "user",
-    "company",
-    "emails",
-    "imap_handler",
-    "telegram_bot",  # Nueva aplicación para Telegram
+
+    # Apps del tenant
+    "company",  # Contiene el modelo tenant
+    "telegram_bot",  # Bot centralizado para todas las empresas
+    "powerbi_handler",  # Integración con Power BI
 ]
 
+# Apps específicas del tenant (esquema privado)
+TENANT_APPS = [
+    "django.contrib.admin",
+    "django.contrib.auth",
+    "django.contrib.contenttypes",
+    "django.contrib.sessions",
+    "django.contrib.messages",
+    "django.contrib.staticfiles",
+
+    # Apps de negocio
+    "user",
+]
+
+INSTALLED_APPS = list(SHARED_APPS) + [app for app in TENANT_APPS if app not in SHARED_APPS]
+
 MIDDLEWARE = [
+    "django_tenants.middleware.main.TenantMainMiddleware",  # DEBE ir PRIMERO
+    "company.middleware.TenantAdminMiddleware",  # Configurar admin según esquema
     "django.middleware.security.SecurityMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "django.middleware.common.CommonMiddleware",
@@ -71,6 +90,7 @@ TEMPLATES = [
                 "django.template.context_processors.request",
                 "django.contrib.auth.context_processors.auth",
                 "django.contrib.messages.context_processors.messages",
+                "company.context_processors.schema_context",
             ],
         },
     },
@@ -84,7 +104,7 @@ WSGI_APPLICATION = "app.wsgi.application"
 
 DATABASES = {
     "default": {
-        "ENGINE": "django.db.backends.postgresql",
+        "ENGINE": "django_tenants.postgresql_backend",
         "NAME": os.getenv("POSTGRES_DB", "distribuidora_lucas"),
         "USER": os.getenv("POSTGRES_USER", "postgres"),
         "PASSWORD": os.getenv("POSTGRES_PASSWORD", "postgres"),
@@ -135,20 +155,29 @@ STATIC_URL = "static/"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# ==================================
-# CONFIGURACIÓN IMAP
-# ==================================
-IMAP_HOST = os.getenv("IMAP_HOST", "imap.gmail.com")
-IMAP_PORT = int(os.getenv("IMAP_PORT", 993))
-IMAP_EMAIL = os.getenv("IMAP_EMAIL", "")
-IMAP_PASSWORD = os.getenv("IMAP_PASSWORD", "")
-IMAP_USE_SSL = os.getenv("IMAP_USE_SSL", "True").lower() == "true"
-IMAP_FOLDER_INBOX = os.getenv("IMAP_FOLDER_INBOX", "INBOX")
-IMAP_FOLDER_PROCESSED = os.getenv("IMAP_FOLDER_PROCESSED", "Processed")
 
-# Configuración de procesamiento
-IMAP_BATCH_SIZE = int(os.getenv("IMAP_BATCH_SIZE", 50))
-IMAP_PROCESS_INTERVAL = int(os.getenv("IMAP_PROCESS_INTERVAL", 300))
+# ==================================
+# CONFIGURACIÓN POWER BI
+# ==================================
+# NOTA: Las credenciales de Power BI ahora se configuran en el admin
+# a través del modelo PowerBIGlobalConfig. Estas variables se mantienen
+# solo para compatibilidad/migración inicial.
+POWERBI_TENANT_ID = os.getenv("POWERBI_TENANT_ID", "")
+POWERBI_CLIENT_ID = os.getenv("POWERBI_CLIENT_ID", "")
+POWERBI_CLIENT_SECRET = os.getenv("POWERBI_CLIENT_SECRET", "")
+POWERBI_GROUP_ID = os.getenv("POWERBI_GROUP_ID", "")
+POWERBI_DATASET_ID = os.getenv("POWERBI_DATASET_ID", "")
+POWERBI_CHECK_INTERVAL = int(os.getenv("POWERBI_CHECK_INTERVAL", 60))
+
+# ==================================
+# CONFIGURACIÓN OPENAI
+# ==================================
+# API Key de OpenAI para formatear mensajes de alertas
+OPENAI_API_KEY = os.getenv("OPENAI_API_KEY", "")
+# Modelo a usar (gpt-3.5-turbo es más económico, gpt-4 más preciso)
+OPENAI_MODEL = os.getenv("OPENAI_MODEL", "gpt-3.5-turbo")
+# Tokens máximos para la respuesta
+OPENAI_MAX_TOKENS = int(os.getenv("OPENAI_MAX_TOKENS", 500))
 
 # ==================================
 # CONFIGURACIÓN CELERY & REDIS
@@ -160,9 +189,11 @@ CELERY_TASK_SERIALIZER = "json"
 CELERY_RESULT_SERIALIZER = "json"
 CELERY_TIMEZONE = TIME_ZONE
 CELERY_BEAT_SCHEDULE = {
-    "process-imap-emails": {
-        "task": "imap_handler.tasks.process_imap_emails_task",
-        "schedule": IMAP_PROCESS_INTERVAL,  # Cada X minutos según configuración
+    # Task maestro que procesa todas las alertas de Power BI
+    # Se ejecuta cada 60 segundos, pero cada alerta tiene su propio intervalo
+    "process-all-powerbi-alerts": {
+        "task": "powerbi_handler.tasks.process_all_powerbi_alerts",
+        "schedule": POWERBI_CHECK_INTERVAL,  # 60 segundos por defecto
     },
 }
 
@@ -217,7 +248,7 @@ LOGGING = {
         "file": {
             "level": "INFO",
             "class": "logging.FileHandler",
-            "filename": BASE_DIR / "logs" / "imap_handler.log",
+            "filename": BASE_DIR / "logs" / "app.log",
             "formatter": "verbose",
         },
         "console": {
@@ -227,7 +258,7 @@ LOGGING = {
         },
     },
     "loggers": {
-        "imap_handler": {
+        "powerbi_handler": {
             "handlers": ["file", "console"],
             "level": os.getenv("LOG_LEVEL", "INFO"),
             "propagate": False,
@@ -237,3 +268,20 @@ LOGGING = {
 
 # Crear directorio de logs si no existe
 os.makedirs(BASE_DIR / "logs", exist_ok=True)
+
+# ==================================
+# CONFIGURACIÓN DJANGO TENANTS
+# ==================================
+
+# Modelo de tenant
+TENANT_MODEL = "company.Company"
+
+# Modelo de dominio
+TENANT_DOMAIN_MODEL = "company.Domain"
+
+# Configuración de la base de datos para tenants
+DATABASE_ROUTERS = ("django_tenants.routers.TenantSyncRouter",)
+
+# Configuración del esquema público
+PUBLIC_SCHEMA_NAME = "public"
+PUBLIC_SCHEMA_URLCONF = "app.urls_public"

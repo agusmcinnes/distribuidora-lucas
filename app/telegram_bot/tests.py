@@ -7,7 +7,6 @@ from django.conf import settings
 from unittest.mock import patch, MagicMock
 from telegram_bot.models import TelegramConfig, TelegramChat, TelegramMessage
 from telegram_bot.services import TelegramService, TelegramNotificationService
-from emails.models import ReceivedEmail
 from company.models import Company
 
 
@@ -138,7 +137,7 @@ class TelegramNotificationServiceTestCase(TestCase):
 
 
 class TelegramIntegrationTestCase(TestCase):
-    """Tests de integración con el sistema de emails"""
+    """Tests de integración con el sistema de alertas"""
 
     def setUp(self):
         # Crear company
@@ -158,23 +157,7 @@ class TelegramIntegrationTestCase(TestCase):
             is_active=True,
         )
 
-    @patch("telegram_bot.tasks.send_email_alert_task.delay")
-    def test_email_signal_triggers_telegram_alert(self, mock_task):
-        """Test que la señal de email dispare una alerta de Telegram"""
-        # Crear un email (esto debería disparar la señal)
-        email = ReceivedEmail.objects.create(
-            sender="test@example.com",
-            subject="Test Email",
-            body_text="This is a test email",
-            body_html="<p>This is a test email</p>",
-            priority="medium",
-        )
-
-        # Verificar que se llamó la tarea de Telegram
-        mock_task.assert_called_once()
-
-        # Verificar los argumentos
-        call_args = mock_task.call_args
-        self.assertEqual(call_args[1]["email_subject"], "Test Email")
-        self.assertEqual(call_args[1]["email_sender"], "test@example.com")
-        self.assertEqual(call_args[1]["email_priority"], "medium")
+    def test_company_chat_creation(self):
+        """Test que se pueda crear un chat asociado a una company"""
+        self.assertIsNotNone(self.chat)
+        self.assertEqual(self.chat.chat_id, 123456789)

@@ -1,7 +1,8 @@
 from django.db import models
+from django_tenants.models import TenantMixin, DomainMixin
 
 
-class Company(models.Model):
+class Company(TenantMixin):
     """
     Modelo que representa una empresa distribuidora.
     """
@@ -32,7 +33,29 @@ class Company(models.Model):
         return self.name
 
     def get_active_users_count(self):
-        """Retorna el número de usuarios activos de la empresa"""
-        return self.users.filter(is_active=True).count()
+        """
+        Retorna el número de usuarios activos de la empresa.
+        NOTA: No se puede usar self.users directamente en esquema público
+        porque es una relación cross-schema.
+        """
+        from django_tenants.utils import tenant_context
+        from django.db import connection
+
+        if self.schema_name == 'public':
+            return 0
+
+        try:
+            with tenant_context(self):
+                from user.models import User
+                return User.objects.filter(is_active=True).count()
+        except Exception:
+            return 0
 
     get_active_users_count.short_description = "Usuarios activos"
+
+
+class Domain(DomainMixin):
+    """
+    Dominios asociados a cada tenant (empresa)
+    """
+    pass
