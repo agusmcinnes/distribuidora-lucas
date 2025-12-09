@@ -303,11 +303,9 @@ class CompanyAdmin(admin.ModelAdmin):
     manage_users_display.short_description = "Gestión de Usuarios"
 
     def _get_csrf_token(self):
-        """Helper para obtener el CSRF token (simplificado)"""
+        """Helper para obtener el CSRF token del request actual"""
         from django.middleware.csrf import get_token
-        from django.http import HttpRequest
-        request = HttpRequest()
-        return get_token(request)
+        return get_token(self._current_request)
 
     def _get_telegram_code_for_user(self, user, company):
         """Obtiene el código de telegram activo para un usuario"""
@@ -380,6 +378,9 @@ class CompanyAdmin(admin.ModelAdmin):
 
     def changeform_view(self, request, object_id=None, form_url='', extra_context=None):
         """Override para manejar el POST de creación de usuarios"""
+        # Guardar request para uso en manage_users_display
+        self._current_request = request
+
         if request.method == 'POST' and request.POST.get('action') == 'create_user_for_company':
             return self._handle_create_user(request, object_id)
 
