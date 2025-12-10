@@ -1,0 +1,173 @@
+services:
+  # Base de datos PostgreSQL
+  db:
+    image: postgres:15
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-distribuidora_lucas}
+      POSTGRES_USER: ${POSTGRES_USER:-postgres}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - distribuidora_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-postgres} -d ${POSTGRES_DB:-distribuidora_lucas}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # Redis para Celery
+  redis:
+    image: redis:7-alpine
+    networks:
+      - distribuidora_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    volumes:
+      - redis_data:/data
+
+  # Aplicación Django con Daphne (ASGI)
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    command: daphne -b 0.0.0.0 -p 8000 app.asgi:application
+    volumes:
+      - static_volume:/code/app/static
+      - media_volume:/code/app/media
+      - logs_volume:/code/app/logs
+    expose:
+      - "8000"
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DEBUG=False
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-distribuidora_lucas}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - PYTHONPATH=/code/app:.
+      - ALLOWED_HOSTS=${ALLOWED_HOSTS:-localhost,127.0.0.1}
+      - SECRET_KEY=${SECRET_KEY}
+    env_file:
+      - .env
+    networks:
+      - distribuidora_network
+    restart: unless-stopped
+
+  # Nginx como reverse proxy
+  nginx:
+    image: nginx:1.25-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      - static_volume:/code/app/static:ro
+      - media_volume:/code/app/media:ro
+      - ./nginx/ssl:/etc/nginx/ssl:ro
+    depends_on:
+      - web
+    networks:
+      - distribuidora_network
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "nginx", "-t"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+  # Worker de Celery
+  celery:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    command: celery -A app.celery worker --loglevel=info --concurrency=4
+    volumes:
+      - logs_volume:/code/app/logs
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DEBUG=False
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-distribuidora_lucas}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - PYTHONPATH=/code/app:.
+    env_file:
+      - .env
+    networks:
+      - distribuidora_network
+    restart: unless-stopped
+
+  # Celery Beat (scheduler)
+  celery-beat:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    command: celery -A app.celery beat --loglevel=info
+    volumes:
+      - logs_volume:/code/app/logs
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DEBUG=False
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-distribuidora_lucas}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - PYTHONPATH=/code/app:.
+    env_file:
+      - .env
+    networks:
+      - distribuidora_network
+    restart: unless-stopped
+
+  # Bot de Telegram
+  telegram-bot:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    command: python -u manage.py run_telegram_bot --daemon
+    volumes:
+      - logs_volume:/code/app/logs
+    depends_on:
+      db:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      - DEBUG=False
+      - DATABASE_URL=postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD}@db:5432/${POSTGRES_DB:-distribuidora_lucas}
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/0
+      - PYTHONPATH=/code/app:.
+      - PYTHONUNBUFFERED=1
+    env_file:
+      - .env
+    networks:
+      - distribuidora_network
+    restart: unless-stopped
+
+volumes:
+  postgres_data:
+  redis_data:
+  static_volume:
+  media_volume:
+  logs_volume:
+
+networks:
+  distribuidora_network:
+    driver: bridge

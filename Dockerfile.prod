@@ -1,0 +1,54 @@
+# Dockerfile para producción con Daphne
+FROM python:3.11-slim
+
+# Argumentos de build
+ARG APP_USER=appuser
+ARG APP_GROUP=appgroup
+
+# Variables de entorno
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
+ENV DJANGO_SETTINGS_MODULE=app.settings
+
+# Instalar dependencias del sistema
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    libpq-dev \
+    curl \
+    && rm -rf /var/lib/apt/lists/*
+
+# Crear usuario no-root para seguridad
+RUN groupadd --system ${APP_GROUP} && \
+    useradd --system --gid ${APP_GROUP} --create-home ${APP_USER}
+
+# Establecer directorio de trabajo
+WORKDIR /code/app
+
+# Copiar requirements.txt
+COPY requirements.txt /code/
+
+# Instalar dependencias de Python
+RUN pip install --no-cache-dir -r /code/requirements.txt
+
+# Copiar código de la aplicación
+COPY . /code
+
+# Crear directorios necesarios
+RUN mkdir -p /code/app/logs /code/app/static /code/app/media
+
+# Establecer permisos
+RUN chown -R ${APP_USER}:${APP_GROUP} /code
+RUN chmod +x /code/app/manage.py
+
+# Cambiar a usuario no-root
+USER ${APP_USER}
+
+# Exponer puerto
+EXPOSE 8000
+
+# Healthcheck
+HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
+    CMD curl -f http://localhost:8000/health/ || exit 1
+
+# Comando por defecto: Daphne ASGI server
+CMD ["daphne", "-b", "0.0.0.0", "-p", "8000", "app.asgi:application"]
