@@ -28,9 +28,23 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = "django-insecure-yl8w&bw1$3izhp7sb4sx%l&e!u)y)f1cj%itag2klnc$^n54_x"
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+DEBUG = os.getenv("DEBUG", "False").lower() == "true"
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = [
+      "discoveragents.online",
+      "www.discoveragents.online",
+      "localhost",
+      "127.0.0.1",
+]
+
+  # Add after ALLOWED_HOSTS:
+CSRF_TRUSTED_ORIGINS = [
+      "https://discoveragents.online",
+      "https://www.discoveragents.online",
+]
+
+SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
+
 
 
 # Application definition
